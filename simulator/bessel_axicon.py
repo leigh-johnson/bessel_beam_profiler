@@ -8,6 +8,41 @@ def um_to_m(x_um):
     return x_um * 1e-6
 
 
+@dataclass(frozen=True)
+class AxiconParams:
+    wavelength_nm: float = 650.0
+    n: float = 1.457
+    alpha_deg: float = 5.0
+
+    @property
+    def wavelength_m(self):
+        return self.wavelength_nm * 1e-9
+
+    @property
+    def alpha_rad(self):
+        return np.deg2rad(self.alpha_deg)
+
+    @property
+    def k(self):
+        return 2 * np.pi / self.wavelength_m
+
+    @property
+    def k_r(self):
+        # Rao relation: k_r = k sin[(n - 1) alpha]
+        return self.k * np.sin((self.n - 1) * self.alpha_rad)
+
+    @property
+    def k_r_small_angle(self):
+        return self.k * (self.n - 1) * self.alpha_rad
+
+    def check_small_angle_approximation(self):
+        relative_error = (self.k_r_small_angle - self.k_r) / self.k_r
+        print(f"k = {self.k:.3e} 1/m")
+        print(f"k_r = {self.k_r:.3e} 1/m")
+        print(f"k_r small-angle approx = {self.k_r_small_angle:.3e} 1/m")
+        print(f"relative error = {(self.k_r_small_angle - self.k_r) / self.k_r:.3e}")
+        return relative_error
+
 def zmax_axicon(w_um, params: AxiconParams):
     """
     Rao Eq. 3.18:
@@ -50,37 +85,3 @@ def bessel_gauss_intensity(
 
     return I
 
-@dataclass(frozen=True)
-class AxiconParams:
-    wavelength_nm: float = 650.0
-    n: float = 1.457
-    alpha_deg: float = 5.0
-
-    @property
-    def wavelength_m(self):
-        return self.wavelength_nm * 1e-9
-
-    @property
-    def alpha_rad(self):
-        return np.deg2rad(self.alpha_deg)
-
-    @property
-    def k(self):
-        return 2 * np.pi / self.wavelength_m
-
-    @property
-    def k_r(self):
-        # Rao relation: k_r = k sin[(n - 1) alpha]
-        return self.k * np.sin((self.n - 1) * self.alpha_rad)
-
-    @property
-    def k_r_small_angle(self):
-        return self.k * (self.n - 1) * self.alpha_rad
-
-    def check_small_angle_approximation(self):
-        relative_error = (self.k_r_small_angle - self.k_r) / self.k_r
-        print(f"k = {self.k:.3e} 1/m")
-        print(f"k_r = {self.k_r:.3e} 1/m")
-        print(f"k_r small-angle approx = {self.k_r_small_angle:.3e} 1/m")
-        print(f"relative error = {(self.k_r_small_angle - self.k_r) / self.k_r:.3e}")
-        return relative_error
