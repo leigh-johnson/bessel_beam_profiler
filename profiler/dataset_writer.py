@@ -92,7 +92,9 @@ class StageController(Protocol):
         point: ScanPoint,
         signals: AcquisitionSignals,
     ) -> None:
-        pass
+        # TODO move to XYZ
+        signals.MovementStarted.set()
+        time.sleep(1)
 
     def wait_until_motion_complete(
         self,
@@ -100,7 +102,9 @@ class StageController(Protocol):
         timeout_s: float,
         signals: AcquisitionSignals,
     ) -> None:
-        pass
+        # TODO check if XYZ motion is complete
+        time.sleep(1)
+        signals.MovementComplete.set()
 
 
 @dataclass(frozen=True)
