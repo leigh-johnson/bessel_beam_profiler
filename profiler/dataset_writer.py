@@ -1,10 +1,11 @@
-from __future__ import annotations # convert type hints to strings at runtime
+from __future__ import annotations  # convert type hints to strings at runtime
 
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
-from typing import Any, Iterable, Optional, Protocol
+from typing import Any, Iterable, Optional
 import datetime as dt
 import json
+import re
 import threading
 import time
 import uuid
@@ -13,7 +14,8 @@ import numpy as np
 import PySpin
 
 from camera_settings import FLIRCameraSettings
-from coordinates import XY, ScanPoint, AcquisitionSignals
+from coordinates import ScanPoint, Vec3D
+
 
 class DatasetWriterError(RuntimeError):
     pass
@@ -26,11 +28,12 @@ class DatasetWriterConfig:
     StageTimeout_s: float = 30.0
     SettleTime_s: float = 0.0
 
-    # This is the Spinnaker GenAPI AcquisitionMode enum name. 
+    # This is the Spinnaker GenAPI AcquisitionMode enum name.
     # The FLIR examples use "Continuous" for live display and "SingleFrame" for single-shot acquisition.
     AcquisitionMode: str = "SingleFrame"
 
-    # Save uint8 / uint16 arrays in binary numpy format. We can encode to BMP or PNG, but want to avoid any lossy compression at this stage.
+    # Save uint8 / uint16 arrays in binary numpy format.
+    # We can encode to BMP or PNG later, but want to avoid any lossy compression at this stage.
     ImageExtension: str = ".npy"
 
     # Give each run a unique ID so that multiple runs on the same day don't collide.
@@ -44,7 +47,8 @@ class DatasetWriterConfig:
 @dataclass
 class AcquisitionSignals:
     """
-    threading.Event objects used to coordinate the acquisition order between the dataset writer and a stepper-motor controller.
+    threading.Event objects used to coordinate the acquisition order between
+    the dataset writer and a stepper-motor controller.
 
     The important safety gate is:
 
@@ -63,8 +67,10 @@ class AcquisitionSignals:
     StopRequested: threading.Event = field(default_factory=threading.Event)
 
     # TODO: potential speed-up
-    # add a "FrameAcquired" signal that is set after the writer has acquired the frame but before it writes to disk. 
-    # This would allow a future stepper-motor controller to start moving while the writer is still writing the frame to disk.
+    # Add a "FrameAcquired" signal that is set after the writer has acquired
+    # the frame but before it writes to disk. This would allow a future
+    # stepper-motor controller to start moving while the writer is still
+    # writing the frame to disk.
 
     def reset_for_position(self) -> None:
         self.MovementStarted.clear()
@@ -74,16 +80,17 @@ class AcquisitionSignals:
         self.FrameWritten.clear()
 
 
-class StageController(Protocol):
+class StageController:
     """
-    Interface for future stepper-motor integration.
+    Stub for future stepper-motor integration.
 
     The dataset writer assumes:
 
         move_to_scan_point(...) starts or performs the motion
         wait_until_motion_complete(...) blocks until the stage is actually still
 
-    TODO: wrap calls to FluidNC, which will be running on an ESP32 microcontroller to drive stepper motors.
+    TODO: wrap calls to FluidNC, which will be running on an ESP32 microcontroller
+    to drive stepper motors.
     http://wiki.fluidnc.com/en/home
     """
 
@@ -92,7 +99,10 @@ class StageController(Protocol):
         point: ScanPoint,
         signals: AcquisitionSignals,
     ) -> None:
-        # TODO move to XYZ
+        # TODO move to XYZ:
+        #   point.GantryPosition_mm.x_mm
+        #   point.GantryPosition_mm.y_mm
+        #   point.GantryPosition_mm.z_mm
         signals.MovementStarted.set()
         time.sleep(1)
 
@@ -102,24 +112,35 @@ class StageController(Protocol):
         timeout_s: float,
         signals: AcquisitionSignals,
     ) -> None:
-        # TODO check if XYZ motion is complete
+        # TODO check if XYZ motion is complete.
         time.sleep(1)
         signals.MovementComplete.set()
 
 
 @dataclass(frozen=True)
 class FrameRecord:
+    """
+    Metadata for one saved camera frame.
+
+    GantryPosition_mm is the motor-control coordinate.
+    TablePosition_mm is the optics-table / beamline reconstruction coordinate.
+    """
+
     Path: str
-    ZPosition_mm: float
-    TopLeftXY: XY
-    BotRightXY: XY
+
+    PlacementID: str
+    GantryPosition_mm: Vec3D
+    TablePosition_mm: Vec3D
+
     ShotIndex: int
     TimestampUTC: str
-    Shape: tuple[int, int]
+
+    Shape: tuple[int, ...]
     DType: str
     Min: int
     Max: int
     SaturatedPixelCount: Optional[int]
+
     Extra: dict[str, Any] = field(default_factory=dict)
 
 
@@ -158,9 +179,11 @@ class FLIRDatasetWriter:
         run_metadata = {
             "CreatedUTC": _utc_now(),
             "RunDir": str(self.run_dir),
-            "Config": {
-                **asdict(self.config),
-                "DatasetRoot": str(self.config.DatasetRoot),
+            "Config": _dataclass_to_jsonable(self.config),
+            "CoordinateConvention": {
+                "GantryPosition_mm": "Local CNC/gantry coordinates used for motion commands.",
+                "TablePosition_mm": "Optics-table / beamline coordinates used for reconstruction.",
+                "PlacementID": "Physical placement of the CNC gantry on the optics table.",
             },
         }
 
@@ -170,17 +193,34 @@ class FLIRDatasetWriter:
 
         return self.run_dir
 
+    def write_json_artifact(self, filename: str, payload: Any) -> Path:
+        """
+        Save scan plans, placements, machine limits, notes, etc. beside the data.
+
+        Example:
+            writer.write_json_artifact("scan_plan.json", plan)
+        """
+
+        if not filename.endswith(".json"):
+            raise ValueError("filename must end with '.json'")
+
+        path = self.run_dir / filename
+        path.write_text(json.dumps(_dataclass_to_jsonable(payload), indent=2) + "\n")
+        return path
+
     def acquire_scan(self, points: Iterable[ScanPoint]) -> list[FrameRecord]:
         """
-        Acquire the full z-scan.
+        Acquire a scan from points generated by coordinates.XYCrossSectionPlan
+        or coordinates.ZStackPlan.
 
         For each ScanPoint:
 
-            1. command/wait for stage motion
+            1. command/wait for stage motion using point.GantryPosition_mm
             2. require MovementComplete signal
             3. wait optional settling time
             4. acquire images
             5. write arrays to disk
+            6. record both gantry and table coordinates
         """
 
         records: list[FrameRecord] = []
@@ -210,6 +250,7 @@ class FLIRDatasetWriter:
         self.signals.reset_for_position()
 
         # Hook for future stepper implementation.
+        # Motor motion should use point.GantryPosition_mm, not point.TablePosition_mm.
         self.stage_controller.move_to_scan_point(point, self.signals)
 
         self.stage_controller.wait_until_motion_complete(
@@ -222,8 +263,9 @@ class FLIRDatasetWriter:
 
         if not ok:
             raise DatasetWriterError(
-                f"Timed out waiting for stage motion complete at "
-                f"ZPosition_mm={point.ZPosition_mm}."
+                "Timed out waiting for stage motion complete at "
+                f"PlacementID={point.PlacementID!r}, "
+                f"GantryPosition_mm={point.GantryPosition_mm}."
             )
 
     def _acquire_one_frame(self, point: ScanPoint, shot_idx: int) -> FrameRecord:
@@ -264,9 +306,9 @@ class FLIRDatasetWriter:
 
             return FrameRecord(
                 Path=str(frame_path),
-                ZPosition_mm=point.ZPosition_mm,
-                TopLeftXY=point.TopLeftXY,
-                BotRightXY=point.BotRightXY,
+                PlacementID=point.PlacementID,
+                GantryPosition_mm=point.GantryPosition_mm,
+                TablePosition_mm=point.TablePosition_mm,
                 ShotIndex=shot_idx,
                 TimestampUTC=_utc_now(),
                 Shape=tuple(arr.shape),
@@ -293,9 +335,9 @@ class FLIRDatasetWriter:
 
     def _frame_path(self, point: ScanPoint, shot_idx: int) -> Path:
         filename = (
-            f"{_format_z(point.ZPosition_mm)}-"
-            f"topleft{_format_xy(point.TopLeftXY)}-"
-            f"botright{_format_xy(point.BotRightXY)}-"
+            f"{_format_placement_id(point.PlacementID)}-"
+            f"tablez{_format_mm(point.TablePosition_mm.z_mm)}-"
+            f"gantry{_format_vec3(point.GantryPosition_mm)}-"
             f"shot{shot_idx:04d}"
             f"{self.config.ImageExtension}"
         )
@@ -346,12 +388,29 @@ class FLIRDatasetWriter:
         node_acquisition_mode.SetIntValue(entry.GetValue())
 
 
-def _format_z(z_mm: float) -> str:
-    return f"z{z_mm:010.3f}mm"
+def _format_placement_id(placement_id: str) -> str:
+    safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", placement_id).strip("_")
+    return safe or "placement"
 
 
-def _format_xy(xy: XY) -> str:
-    return f"{xy.x:05d}_{xy.y:05d}"
+def _format_mm(value_mm: float) -> str:
+    """
+    Filename-safe millimeter formatter.
+
+    Examples:
+        +12.5  -> p000012.500mm
+        -12.5  -> m000012.500mm
+    """
+    sign = "m" if value_mm < 0 else "p"
+    return f"{sign}{abs(value_mm):010.3f}mm"
+
+
+def _format_vec3(v: Vec3D) -> str:
+    return (
+        f"x{_format_mm(v.x_mm)}-"
+        f"y{_format_mm(v.y_mm)}-"
+        f"z{_format_mm(v.z_mm)}"
+    )
 
 
 def _utc_now() -> str:
@@ -383,6 +442,12 @@ def _estimate_saturated_pixel_count(arr: np.ndarray) -> Optional[int]:
 def _dataclass_to_jsonable(obj: Any) -> Any:
     if isinstance(obj, Path):
         return str(obj)
+
+    if isinstance(obj, np.integer):
+        return int(obj)
+
+    if isinstance(obj, np.floating):
+        return float(obj)
 
     if hasattr(obj, "__dataclass_fields__"):
         return {
