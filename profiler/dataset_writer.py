@@ -13,34 +13,10 @@ import numpy as np
 import PySpin
 
 from camera_settings import FLIRCameraSettings
+from coordinates import XY, ScanPoint, AcquisitionSignals
 
 class DatasetWriterError(RuntimeError):
     pass
-
-
-@dataclass(frozen=True)
-class XY:
-    x: int
-    y: int
-
-
-@dataclass(frozen=True)
-class ScanPoint:
-    """
-    One beam-profile acquisition position.
-
-    ZPosition is the longitudinal propagation-axis position, in mm.
-
-    TopLeftXY and BotRightXY describe the spatial region represented by this
-    camera frame in the larger stitched/mapped dataset. They do not necessarily
-    set the camera ROI.
-    """
-
-    ZPosition_mm: float
-    TopLeftXY: XY
-    BotRightXY: XY
-    NShots: int = 1
-    Metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
