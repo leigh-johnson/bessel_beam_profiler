@@ -88,10 +88,6 @@ class StageController:
 
         move_to_scan_point(...) starts or performs the motion
         wait_until_motion_complete(...) blocks until the stage is actually still
-
-    TODO: wrap calls to FluidNC, which will be running on an ESP32 microcontroller
-    to drive stepper motors.
-    http://wiki.fluidnc.com/en/home
     """
 
     def move_to_scan_point(
@@ -115,6 +111,19 @@ class StageController:
         # TODO check if XYZ motion is complete.
         time.sleep(1)
         signals.MovementComplete.set()
+
+# TODO: wrap calls to FluidNC, which will be running on an ESP32 microcontroller
+# to drive stepper motors.
+# http://wiki.fluidnc.com/en/home
+# class FluidNCStageController(StageController):
+#     def move_to_scan_point(self, point, signals):
+#         xyz = point.GantryPosition_mm
+#         # TODO send G-code / FluidNC command using xyz.x_mm, xyz.y_mm, xyz.z_mm
+#         signals.MovementStarted.set()
+
+#     def wait_until_motion_complete(self, point, timeout_s, signals):
+#         # TODO poll FluidNC until idle
+#         signals.MovementComplete.set()
 
 
 @dataclass(frozen=True)
