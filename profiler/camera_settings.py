@@ -75,9 +75,9 @@ class FLIRCameraSettings:
                 system.ReleaseInstance()
             ```
     """
-    CameraModel: str = ""
+    CameraModel: str = "" # e.g. BFS-PGE-31S4M
 
-    # Mono8: quick alignment. Mono16 for quantitative beam profiling / fit fn.
+    # Mono8: quick alignment. Mono16 for final beam profiling / fit fn.
     PixelFormat: Optional[PixelFormatName] = "Mono16"
 
     # Exposure
@@ -97,7 +97,8 @@ class FLIRCameraSettings:
     BlackLevelSelector: Optional[str] = "All"
     BlackLevel: Optional[float] = None
 
-    # Usually unavailable / irrelevant for monochrome cameras.
+    # White balance / color channel ratios for RGB-Bayer sensors.
+    # I don't think we need these for monochrome cameras, but included here for completeness since we have a few color cameras in the lab. 
     # Leave these as None for BFS-PGE-31S4M.
     BalanceWhiteAuto: Optional[AutoMode] = None
     BalanceRatioBlue: Optional[float] = None
