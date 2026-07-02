@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import PySpin
 
-from camera_settings import FLIRCameraSettings
+from camera_settings import FLIRCameraSettings, PixelFormatName
 
 
 @dataclass(frozen=True)
@@ -18,9 +18,10 @@ class ExposureCalibrationConfig:
     MinExposure_us: float = 25.0
     MaxExposure_us: float = 1_000_000.0
 
-    # For BFS-PGE-31S4M native 12-bit data, 4095 is a reasonable first guess?
-    # Change to 65535 ifsaturating at uint16 max.
-    SaturationThreshold: int = 4095
+    # For BFS-PGE-31S4M Mono8 (uint8), 255 is the maximum pixel value for greyscale images.
+    # TODO Change to 65535 if saturating at uint16 max.
+    PixelFormat: PixelFormatName = "Mono8"
+
     AllowedSaturatedPixels: int = 0
 
     ReductionFactor: float = 0.75
@@ -29,6 +30,19 @@ class ExposureCalibrationConfig:
     AcquisitionTimeout_ms: int = 1000
     DisplayPause_s: float = 0.001
 
+    @property
+    def SaturationThreshold(self) -> int:
+        if self.PixelFormat == "Mono8":
+            return 255
+        elif self.PixelFormat == "Mono10":
+            return 1023
+        elif self.PixelFormat == "Mono12":
+            return 4095
+        elif self.PixelFormat == "Mono16":
+            return 65535
+        else:
+            # TODO I'm not messing with Mono12Packed bit-packed image format for now, since it uses non-linear mapping. See the FLIR Spinnaker SDK documentation for details. You're welcome to implement it, but know that it will require a different non-linear way of evaluating thesaturation threshold and a different way to unpack the pixel values.
+            raise ValueError(f"Unsupported PixelFormat: {self.PixelFormat}. Implement ExposureCalibrationConfig.saturation_threshold for this PixelFormat.")
 
 @dataclass(frozen=True)
 class ExposureCalibrationResult:

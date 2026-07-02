@@ -78,7 +78,7 @@ class FLIRCameraSettings:
     CameraModel: str = "" # e.g. BFS-PGE-31S4M
 
     # Mono8: quick alignment. Mono16 for final beam profiling / fit fn.
-    PixelFormat: Optional[PixelFormatName] = "Mono16"
+    PixelFormat: Optional[PixelFormatName] = "Mono8"
 
     # Exposure
     ExposureAuto: Optional[AutoMode] = "Off"

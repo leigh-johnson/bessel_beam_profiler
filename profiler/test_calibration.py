@@ -408,7 +408,6 @@ def test_auto_reduce_updates_real_flir_camera_settings_result(
         cam,
         make_base_settings(camera_settings, exposure_us=1000.0),
         config=calibration.ExposureCalibrationConfig(
-            SaturationThreshold=4095,
             ReductionFactor=0.5,
             AcquisitionTimeout_ms=50,
             DisplayPause_s=0,
