@@ -37,6 +37,8 @@ import os
 import PySpin
 import time
 import sys
+import ipaddress
+
 
 # Total number of GenTL buffers. 1-2 buffers unavailable for some buffer modes
 NUM_BUFFERS = 6
@@ -214,11 +216,26 @@ def print_device_info(nodemap):
 
         # Retrieve and display Device Information
         node_device_information = PySpin.CCategoryPtr(nodemap.GetNode('DeviceInformation'))
+
+        mac_addr_features = ["GevDeviceMACAddress"]
+        ip_addr_features = ["GevDeviceIPAddress", "GevDeviceSubnetMask", "GevDeviceGateway"]
         if PySpin.IsReadable(node_device_information):
             features = node_device_information.GetFeatures()
             for feature in features:
                 node_feature = PySpin.CValuePtr(feature)
-                print('%s: %s' % (node_feature.GetName(),
+
+                if feature.GetName() in ip_addr_features:
+                    if PySpin.IsReadable(node_feature):
+                        ip_addr = node_feature.ToString()
+                        ip_addr = ipaddress.IPv4Address(int(ip_addr, 16))
+                    print('%s: %s' % (node_feature.GetName(), ip_addr))
+                elif feature.GetName() in mac_addr_features:
+                    if PySpin.IsReadable(node_feature):
+                        mac_addr = node_feature.ToString()
+                        mac_addr = ':'.join(mac_addr[i:i+2] for i in range(0, len(mac_addr), 2))
+                    print('%s: %s' % (node_feature.GetName(), mac_addr))
+                else:
+                    print('%s: %s' % (node_feature.GetName(),
                                   node_feature.ToString() if PySpin.IsReadable(node_feature) else 'Node not readable'))
 
         else:
@@ -232,6 +249,40 @@ def print_device_info(nodemap):
 
 def read_writeable(node):
     return PySpin.IsReadable(node) and PySpin.IsWritable(node)
+
+
+def configure_frame_rate(nodemap, target_fps: float = 2.0) -> None:
+    """Best-effort frame-rate configuration."""
+    node_frame_rate_auto = PySpin.CEnumerationPtr(
+        nodemap.GetNode("AcquisitionFrameRateAuto")
+    )
+    if PySpin.IsAvailable(node_frame_rate_auto) and PySpin.IsWritable(
+        node_frame_rate_auto
+    ):
+        entry_off = node_frame_rate_auto.GetEntryByName("Off")
+        if PySpin.IsAvailable(entry_off) and PySpin.IsReadable(entry_off):
+            node_frame_rate_auto.SetIntValue(entry_off.GetValue())
+            print("AcquisitionFrameRateAuto set to Off")
+        else:
+            print("Unable to disable AcquisitionFrameRateAuto.")
+    else:
+        print("Unable to disable AcquisitionFrameRateAuto.")
+
+    node_frame_rate_enable = PySpin.CBooleanPtr(
+        nodemap.GetNode("AcquisitionFrameRateEnable")
+    )
+    if PySpin.IsAvailable(node_frame_rate_enable) and PySpin.IsWritable(
+        node_frame_rate_enable
+    ):
+        node_frame_rate_enable.SetValue(True)
+
+    node_frame_rate = PySpin.CFloatPtr(nodemap.GetNode("AcquisitionFrameRate"))
+    if PySpin.IsAvailable(node_frame_rate) and PySpin.IsWritable(node_frame_rate):
+        target_fps = min(max(target_fps, node_frame_rate.GetMin()), node_frame_rate.GetMax())
+        node_frame_rate.SetValue(target_fps)
+        print(f"Acquisition frame rate set to: {node_frame_rate.GetValue()} FPS")
+    else:
+        print("Unable to set Acquisition Frame Rate.")
 
 def acquire_images(cam, nodemap, nodemap_tldevice):
     """
@@ -250,6 +301,28 @@ def acquire_images(cam, nodemap, nodemap_tldevice):
     try:
         result = True
         print('\n*** IMAGE ACQUISITION ***\n')
+
+        # set acquisition frame rate
+        configure_frame_rate(nodemap, target_fps=1.0)
+
+        node_device_link_throughput_limit = PySpin.CIntegerPtr(nodemap_tldevice.GetNode('DeviceLinkThroughputLimit'))
+        if PySpin.IsReadable(node_device_link_throughput_limit) and PySpin.IsWritable(node_device_link_throughput_limit):
+            # 10 Mb/s
+            node_device_link_throughput_limit.SetValue(10_000_000)
+            print('Device link throughput limit set to %d bps...' % node_device_link_throughput_limit.GetValue())
+        else:
+            print('Unable to set device link throughput limit. Continuing with default throughput limit...')
+
+        # set max packet size for GEV camerasGevSCPSPacketSize
+        node_packet_size = PySpin.CIntegerPtr(nodemap.GetNode('GevSCPSPacketSize'))
+        if PySpin.IsReadable(node_packet_size) and PySpin.IsWritable(node_packet_size):
+            # Set the packet size to the maximum value
+            max_packet_size = 1500
+            node_packet_size.SetValue(max_packet_size)
+            print('Max packet size set to %d bytes...' % node_packet_size.GetValue())
+        elif PySpin.IsReadable(node_packet_size):
+            max_packet_size = node_packet_size.GetValue()
+            print("Unable to set max packet size. Continuing with current packet size of %d bytes..." % max_packet_size)
 
         node_acquisition_mode = PySpin.CEnumerationPtr(nodemap.GetNode('AcquisitionMode'))
         if not read_writeable(node_acquisition_mode):
