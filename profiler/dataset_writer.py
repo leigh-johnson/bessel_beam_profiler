@@ -17,6 +17,8 @@ from camera_settings import FLIRCameraSettings
 from coordinates import ScanPoint, Vec3D
 
 
+system = PySpin.System.GetInstance()
+
 class DatasetWriterError(RuntimeError):
     pass
 
@@ -27,19 +29,6 @@ class DatasetWriterConfig:
     AcquisitionTimeout_ms: int = 2000
     StageTimeout_s: float = 30.0
     SettleTime_s: float = 0.0
-
-    # This is the Spinnaker GenAPI AcquisitionMode enum name.
-    # For software-triggered acquisition, FLIR's buffer-handling example uses
-    # Continuous mode, then captures exactly one frame per TriggerSoftware.Execute().
-    AcquisitionMode: str = "Continuous"
-
-    # Software trigger configuration, ported from profiler/buffer_handling_example.py.
-    TriggerSource: str = "Software"
-
-    # Stream buffer configuration. "NewestOnly" is a good default for beam profiling
-    # because it avoids accidentally reading stale images if the app falls behind.
-    StreamBufferHandlingMode: str = "NewestOnly"
-    StreamBufferCountManual: Optional[int] = 6
 
     # Save uint8 / uint16 arrays in binary numpy format.
     # We can encode to BMP or PNG later, but want to avoid any lossy compression at this stage.
@@ -162,17 +151,53 @@ class FrameRecord:
 
     Extra: dict[str, Any] = field(default_factory=dict)
 
+def _open_camera(camera_index: int) -> PySpin.Camera:
+
+    system = PySpin.System.GetInstance()
+    cam_list = system.GetCameras()
+    cam = None
+
+    num_cameras = cam_list.GetSize()
+
+    if num_cameras == 0:
+        raise Exception("No FLIR cameras detected.")
+
+    if camera_index >= num_cameras:
+        raise Exception(
+            f"Requested camera index {camera_index}, "
+            f"but only {num_cameras} camera(s) were detected."
+        )
+
+    cam = cam_list.GetByIndex(camera_index)
+    cam.Init()
+
+    return cam
+
+
+def _close_camera(cam: PySpin.Camera) -> None:
+    """
+    De-initialize and release a PySpin camera instance.
+
+    This is a separate function so that we can call it in a finally block
+    without having to check if cam is None.
+    """
+
+    cam_list = system.GetCameras()
+    cam.DeInit()
+    cam_list.Clear()
+
 
 class FLIRDatasetWriter:
     def __init__(
         self,
-        cam: PySpin.Camera,
+        camera_index: int,
         camera_settings: FLIRCameraSettings,
         config: DatasetWriterConfig,
         stage_controller: Optional[StageController] = None,
         signals: Optional[AcquisitionSignals] = None,
     ):
-        self.cam = cam
+        self.camera_index = camera_index
+        self.cam = _open_camera(camera_index)
         self.camera_settings = camera_settings
         self.config = config
         self.stage_controller = stage_controller or StageController()
@@ -180,6 +205,13 @@ class FLIRDatasetWriter:
 
         self.run_dir = self.config.make_run_dir()
         self.manifest_path = self.run_dir / "frames.jsonl"
+
+    def __del__(self):
+        print("Cleaning up PySpin Camera and System instances...")
+        _close_camera(self.cam)
+        del self.cam
+        system.ReleaseInstance()
+
 
     def prepare_run(self) -> Path:
         """
@@ -271,12 +303,8 @@ class FLIRDatasetWriter:
         self.signals.reset_for_position()
         self.signals.MovementComplete.set()
 
-        self._prepare_triggered_acquisition()
+        return self._acquire_point_frames(point)
 
-        try:
-            return self._acquire_point_frames(point)
-        finally:
-            self._reset_trigger()
 
     def acquire_scan(self, points: Iterable[ScanPoint]) -> list[FrameRecord]:
         """
@@ -295,17 +323,13 @@ class FLIRDatasetWriter:
 
         records: list[FrameRecord] = []
 
-        self._prepare_triggered_acquisition()
+        for point in points:
+            if self.signals.StopRequested.is_set():
+                break
 
-        try:
-            for point in points:
-                if self.signals.StopRequested.is_set():
-                    break
+            self._move_and_wait(point)
+            records.extend(self._acquire_point_frames(point))
 
-                self._move_and_wait(point)
-                records.extend(self._acquire_point_frames(point))
-        finally:
-            self._reset_trigger()
 
         return records
 
@@ -350,22 +374,19 @@ class FLIRDatasetWriter:
                 record = self._acquire_one_frame(
                     point,
                     shot_idx,
-                    manage_acquisition=False,
                 )
                 self._append_manifest(record)
                 records.append(record)
 
         finally:
-            self._end_acquisition_quietly()
+            self._end_acquisition()
 
         return records
 
     def _acquire_one_frame(
         self,
         point: ScanPoint,
-        shot_idx: int,
-        *,
-        manage_acquisition: bool = True,
+        shot_idx: int
     ) -> FrameRecord:
         """
         Acquire exactly one software-triggered frame after MovementComplete has fired.
@@ -381,12 +402,6 @@ class FLIRDatasetWriter:
         image_result = None
 
         try:
-            if manage_acquisition:
-                self._prepare_triggered_acquisition()
-
-                # This is intentionally after MovementComplete.
-                self.cam.BeginAcquisition()
-
             self._execute_software_trigger()
 
             image_result = self.cam.GetNextImage(self.config.AcquisitionTimeout_ms)
@@ -434,10 +449,6 @@ class FLIRDatasetWriter:
             if image_result is not None:
                 image_result.Release()
 
-            if manage_acquisition:
-                self._end_acquisition_quietly()
-                self._reset_trigger()
-
     def _frame_path(self, point: ScanPoint, shot_idx: int) -> Path:
         filename = (
             f"{_format_placement_id(point.PlacementID)}-"
@@ -467,68 +478,6 @@ class FLIRDatasetWriter:
         with self.manifest_path.open("a") as f:
             f.write(json.dumps(_dataclass_to_jsonable(record)) + "\n")
 
-    def _prepare_triggered_acquisition(self) -> None:
-        """
-        Configure acquisition mode, stream buffering, and software trigger.
-
-        This should be called before BeginAcquisition().
-        """
-
-        self._set_acquisition_mode(self.config.AcquisitionMode)
-        self._configure_stream_buffer()
-        self._configure_software_trigger()
-
-    def _configure_stream_buffer(self) -> None:
-        """
-        Configure the transport-layer stream buffer.
-
-        This is the dataset-writer version of the StreamBufferHandlingMode and
-        StreamBufferCountManual setup in profiler/buffer_handling_example.py.
-        """
-
-        stream_nodemap = self.cam.GetTLStreamNodeMap()
-
-        self._set_enum(
-            stream_nodemap,
-            "StreamBufferHandlingMode",
-            self.config.StreamBufferHandlingMode,
-        )
-
-        if self.config.StreamBufferCountManual is None:
-            return
-
-        self._set_enum(stream_nodemap, "StreamBufferCountMode", "Manual")
-
-        node_buffer_count = PySpin.CIntegerPtr(
-            stream_nodemap.GetNode("StreamBufferCountManual")
-        )
-
-        if not PySpin.IsReadable(node_buffer_count) or not PySpin.IsWritable(
-            node_buffer_count
-        ):
-            raise DatasetWriterError("Unable to set StreamBufferCountManual.")
-
-        value = int(self.config.StreamBufferCountManual)
-
-        if hasattr(node_buffer_count, "GetMin"):
-            value = max(value, int(node_buffer_count.GetMin()))
-
-        if hasattr(node_buffer_count, "GetMax"):
-            value = min(value, int(node_buffer_count.GetMax()))
-
-        node_buffer_count.SetValue(value)
-
-    def _configure_software_trigger(self) -> None:
-        """
-        Configure TriggerMode/TriggerSource for one frame per software trigger.
-        """
-
-        nodemap = self.cam.GetNodeMap()
-
-        # Trigger must be Off before changing TriggerSource.
-        self._set_enum(nodemap, "TriggerMode", "Off")
-        self._set_enum(nodemap, "TriggerSource", self.config.TriggerSource)
-        self._set_enum(nodemap, "TriggerMode", "On")
 
     def _execute_software_trigger(self) -> None:
         nodemap = self.cam.GetNodeMap()
@@ -539,29 +488,9 @@ class FLIRDatasetWriter:
 
         command.Execute()
 
-    def _reset_trigger(self) -> None:
-        """
-        Best-effort cleanup: restore TriggerMode to Off.
-        """
+    def _end_acquisition(self) -> None:
+        return self.cam.EndAcquisition()
 
-        nodemap = self.cam.GetNodeMap()
-        node_trigger_mode = PySpin.CEnumerationPtr(nodemap.GetNode("TriggerMode"))
-
-        if not PySpin.IsReadable(node_trigger_mode) or not PySpin.IsWritable(
-            node_trigger_mode
-        ):
-            return
-
-        entry_off = node_trigger_mode.GetEntryByName("Off")
-
-        if PySpin.IsReadable(entry_off):
-            node_trigger_mode.SetIntValue(entry_off.GetValue())
-
-    def _end_acquisition_quietly(self) -> None:
-        try:
-            self.cam.EndAcquisition()
-        except PySpin.SpinnakerException:
-            pass
 
     def _set_acquisition_mode(self, mode: str) -> None:
         """

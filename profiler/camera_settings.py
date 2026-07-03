@@ -22,7 +22,7 @@ PixelFormatName = Literal[
 AUTO_MODES = {"Off", "Once", "Continuous"}
 EXPOSURE_MODES = {"Timed", "TriggerWidth"}
 PIXEL_FORMATS = {"Mono8", "Mono10p", "Mono12p", "Mono12Packed", "Mono16"}
-
+STREAM_BUFFER_HANDLING_MODES = {"NewestFirst", "OldestFirst", "OldestFirstOverwrite"}
 
 class CameraSettingError(RuntimeError):
     pass
@@ -75,6 +75,15 @@ class FLIRCameraSettings:
                 system.ReleaseInstance()
             ```
     """
+    # This is the Spinnaker GenAPI AcquisitionMode enum name.
+    # For software-triggered acquisition, FLIR's buffer-handling example uses
+    # Continuous mode, then captures exactly one frame per TriggerSoftware.Execute().
+    AcquisitionMode: str = "Continuous"
+    AcquisitionFrameRateEnable: bool = True
+    AcquisitionFrameRate: float = 1.0 # frames per second, e.g. 1.0
+
+    TriggerSource: str = "Software"
+
     CameraModel: str = "" # e.g. BFS-PGE-31S4M
 
     # Mono8: quick alignment. Mono16 for final beam profiling / fit fn.
@@ -83,8 +92,13 @@ class FLIRCameraSettings:
     # Exposure
     ExposureAuto: Optional[AutoMode] = "Off"
     ExposureMode: Optional[ExposureModeName] = "Timed"
-    ExposureTime: Optional[float] = None  # microseconds
+    ExposureTime: Optional[float] = 1000  # microseconds
 
+    # Packet size for GEV cameras. 
+    # 1500 bytes is a good default for Wifi networks.
+    # For wired networks, you can try 9000 bytes (jumbo frames) if your network supports it.
+    GevSCPSPacketSize: Optional[int] = 1500
+    
     # Gain
     GainAuto: Optional[AutoMode] = "Off"
     Gain: Optional[float] = 0.0  # dB
@@ -104,6 +118,11 @@ class FLIRCameraSettings:
     BalanceRatioBlue: Optional[float] = None
     BalanceRatioRed: Optional[float] = None
 
+    StreamBufferCountManual: Optional[int] = 10
+    StreamBufferHandlingMode: Optional[str] = "NewestFirst"
+    StreamBufferCountMode: Optional[str] = "Manual"
+    DeviceLinkThroughputLimit: Optional[int] = 10_000_000 # bits
+
     def __post_init__(self) -> None:
         # validate settings
         _check_choice("ExposureAuto", self.ExposureAuto, AUTO_MODES)
@@ -111,6 +130,8 @@ class FLIRCameraSettings:
         _check_choice("BalanceWhiteAuto", self.BalanceWhiteAuto, AUTO_MODES)
         _check_choice("ExposureMode", self.ExposureMode, EXPOSURE_MODES)
         _check_choice("PixelFormat", self.PixelFormat, PIXEL_FORMATS)
+        _check_choice("StreamBufferHandlingMode", self.StreamBufferHandlingMode, STREAM_BUFFER_HANDLING_MODES)
+
 
         if self.ExposureTime is not None and self.ExposureTime <= 0:
             raise ValueError("ExposureTime must be positive, in microseconds.")
@@ -120,6 +141,9 @@ class FLIRCameraSettings:
 
         if self.Gamma is not None and self.Gamma <= 0:
             raise ValueError("Gamma must be positive.")
+        
+        if self.AcquisitionFrameRate is not None and self.AcquisitionFrameRate <= 0:
+            raise ValueError("AcquisitionFrameRate must be positive, in frames per second.")
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -143,6 +167,8 @@ class FLIRCameraSettings:
         """
 
         return cls(
+            AcquisitionFrameRateEnable=_get_bool(cam, "AcquisitionFrameRateEnable", default=True),
+            AcquisitionFrameRate=_get_float(cam, "AcquisitionFrameRate", default=1.0),
             CameraModel=_read_tl_string(cam, "DeviceModelName", default=""),
             PixelFormat=_get_enum(cam, "PixelFormat", default=None),
             ExposureAuto=_get_enum(cam, "ExposureAuto", default=None),
@@ -152,6 +178,7 @@ class FLIRCameraSettings:
             Gain=_get_float(cam, "Gain", default=None),
             GammaEnable=_get_bool(cam, "GammaEnable", default=None),
             Gamma=_get_float(cam, "Gamma", default=None),
+            GevSCPSPacketSize=_get_float(cam, "GevSCPSPacketSize", default=1500),
             BlackLevelSelector=_get_enum(cam, "BlackLevelSelector", default=None),
             BlackLevel=_get_float(cam, "BlackLevel", default=None),
             BalanceWhiteAuto=_get_enum(cam, "BalanceWhiteAuto", default=None),
@@ -169,6 +196,10 @@ class FLIRCameraSettings:
                 value_feature="BalanceRatio",
                 default=None,
             ),
+            StreamBufferCountManual=_get_integer(cam, "StreamBufferCountManual", default=10),
+            StreamBufferHandlingMode=_get_enum(cam, "StreamBufferHandlingMode", default="NewestFirst"),
+            StreamBufferCountMode=_get_enum(cam, "StreamBufferCountMode", default="Manual"),
+            DeviceLinkThroughputLimit=_get_integer(cam, "DeviceLinkThroughputLimit", default=10_000_000),
         )
 
     def apply(
@@ -228,6 +259,24 @@ class FLIRCameraSettings:
                     "ExposureTime was not applied because ExposureAuto is not Off."
                 )
 
+        # Acquisition frame rate
+        if self.AcquisitionFrameRateEnable is not None:
+            _set_bool(
+                cam,
+                "AcquisitionFrameRateEnable",
+                self.AcquisitionFrameRateEnable,
+                strict,
+                messages,
+            )
+        if self.AcquisitionFrameRate is not None:
+            _set_float(
+                cam,
+                "AcquisitionFrameRate",
+                self.AcquisitionFrameRate,
+                strict,
+                messages,
+            )
+
         # Gain
         if self.GainAuto is not None:
             _set_enum(cam, "GainAuto", self.GainAuto, strict, messages)
@@ -269,6 +318,61 @@ class FLIRCameraSettings:
                 _set_enum(cam, "BalanceWhiteAuto", "Off", strict, messages)
             _set_enum(cam, "BalanceRatioSelector", "Red", strict, messages)
             _set_float(cam, "BalanceRatio", self.BalanceRatioRed, strict, messages)
+
+        # Stream buffer settings
+        # These are set using s_node_map = cam.GetTLStreamNodeMap()
+        # So we can't use the QuickSpin cam object for these, and must use the GenAPI node map instead.
+
+        # Retrieve Stream Parameters device nodemap
+        s_node_map = cam.GetTLStreamNodeMap()
+
+        handling_mode = PySpin.CEnumerationPtr(s_node_map.GetNode('StreamBufferHandlingMode'))
+        if not _read_writeable(handling_mode):
+            _skip_or_raise(strict, messages, "StreamBufferHandlingMode is not available/writable.")
+        else:
+            handling_mode_entry = handling_mode.GetEntryByName(self.StreamBufferHandlingMode)
+            handling_mode.SetIntValue(handling_mode_entry.GetValue())
+
+        # Set stream buffer Count Mode to manual
+        stream_buffer_count_mode = PySpin.CEnumerationPtr(s_node_map.GetNode('StreamBufferCountMode'))
+        if not _read_writeable(stream_buffer_count_mode):
+            _skip_or_raise(strict, messages, "StreamBufferCountMode is not available/writable.")
+        else:
+            stream_buffer_count_mode_entry = stream_buffer_count_mode.GetEntryByName(self.StreamBufferCountMode)
+            stream_buffer_count_mode.SetIntValue(stream_buffer_count_mode_entry.GetValue())
+
+        # must be set after StreamBufferCountMode is set to Manual
+        if self.StreamBufferCountMode == "Manual" and self.StreamBufferCountManual is not None:
+            buffer_count = PySpin.CIntegerPtr(s_node_map.GetNode('StreamBufferCountManual'))
+            if not _read_writeable(buffer_count):
+                _skip_or_raise(strict, messages, "StreamBufferCountManual is not available/writable.")
+            else:
+                buffer_count.SetValue(self.StreamBufferCountManual)
+
+        if self.DeviceLinkThroughputLimit is not None:
+            _set_integer(
+                cam,
+                "DeviceLinkThroughputLimit",
+                self.DeviceLinkThroughputLimit,
+                strict,
+                messages,
+            )
+        if self.GevSCPSPacketSize is not None:
+            _set_integer(
+                cam,
+                "GevSCPSPacketSize",
+                self.GevSCPSPacketSize,
+                strict,
+                messages,
+            )
+
+        # set software trigger source
+        if self.TriggerSource is not None:
+            # Trigger must be Off before changing TriggerSource.
+            _set_enum(cam, "TriggerMode", "Off", strict, messages)
+            _set_enum(cam, "TriggerSource", self.TriggerSource, strict, messages)
+            _set_enum(cam, "TriggerMode", "On", strict, messages)
+
 
         return messages
 
@@ -400,6 +504,32 @@ def _set_bool(
     except PySpin.SpinnakerException as ex:
         _skip_or_raise(strict, messages, f"Failed to set {feature}={value}: {ex}")
 
+def _set_integer(
+    cam: PySpin.Camera,
+    feature: str,
+    value: int,
+    strict: bool,
+    messages: list[str],
+) -> None:
+    node = _quickspin_node(cam, feature)
+
+    if not _is_writable(node):
+        _skip_or_raise(strict, messages, f"{feature} is not available/writable.")
+        return
+
+    try:
+        if hasattr(node, "GetMin") and hasattr(node, "GetMax"):
+            lo = int(node.GetMin())
+            hi = int(node.GetMax())
+            if not (lo <= int(value) <= hi):
+                raise ValueError(
+                    f"{feature}={value} is outside camera range [{lo}, {hi}]."
+                )
+
+        node.SetValue(int(value))
+
+    except (PySpin.SpinnakerException, ValueError) as ex:
+        _skip_or_raise(strict, messages, f"Failed to set {feature}={value}: {ex}")
 
 def _get_enum(
     cam: PySpin.Camera,
@@ -457,6 +587,21 @@ def _get_bool(
     except PySpin.SpinnakerException:
         return default
 
+def _get_integer(
+    cam: PySpin.Camera,
+    feature: str,
+    *,
+    default: Optional[int],
+) -> Optional[int]:
+    node = _quickspin_node(cam, feature)
+
+    if not _is_readable(node):
+        return default
+
+    try:
+        return int(node.GetValue())
+    except PySpin.SpinnakerException:
+        return default
 
 def _read_tl_string(
     cam: PySpin.Camera,
@@ -496,3 +641,6 @@ def _get_selected_float(
     )
 
     return _get_float(cam, value_feature, default=default)
+
+def _read_writeable(node):
+    return PySpin.IsReadable(node) and PySpin.IsWritable(node)
