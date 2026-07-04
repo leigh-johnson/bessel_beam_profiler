@@ -22,7 +22,7 @@ PixelFormatName = Literal[
 AUTO_MODES = {"Off", "Once", "Continuous"}
 EXPOSURE_MODES = {"Timed", "TriggerWidth"}
 PIXEL_FORMATS = {"Mono8", "Mono10p", "Mono12p", "Mono12Packed", "Mono16"}
-STREAM_BUFFER_HANDLING_MODES = {"NewestFirst", "OldestFirst", "OldestFirstOverwrite"}
+STREAM_BUFFER_HANDLING_MODES = {"NewestFirst", "OldestFirst", "OldestFirstOverwrite", "NewestOnly"}
 ACQUISITION_MODES = {"SingleFrame", "MultiFrame", "Continuous"}
 
 class CameraSettingError(RuntimeError):
@@ -122,7 +122,7 @@ class FLIRCameraSettings:
     SharpeningEnable: Optional[bool] = False
 
     StreamBufferCountManual: Optional[int] = 10
-    StreamBufferHandlingMode: Optional[str] = "NewestFirst"
+    StreamBufferHandlingMode: Optional[str] = "NewestOnly"
     StreamBufferCountMode: Optional[str] = "Manual"
     DeviceLinkThroughputLimit: Optional[int] = 10_000_000 # bits
 

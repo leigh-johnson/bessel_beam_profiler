@@ -69,6 +69,9 @@ class FakeEnumNode:
         self.entries_requested.append(name)
         return FakeEnumEntry(name, value=len(self.entries_requested))
 
+    def SetValue(self, value):
+        self.set_values.append(value)
+
     def SetIntValue(self, value):
         self.set_values.append(value)
 
@@ -115,11 +118,18 @@ class FakeCamera:
         self.ExposureMode = FakeNode()
         self.ExposureTime = FakeNode(minimum=25.0, maximum=1_000_000.0)
 
+        self.AcquisitionFrameRatePersistance = FakeNode(True)
+        self.AcquisitionMode = FakeEnumNode()
+        self.AcquisitionFrameRateEnable = FakeNode(True)
+        self.AcquisitionFrameRate = FakeNode(1.0, minimum=0.0, maximum=1_000_000.0)
+
         self.GainAuto = FakeNode()
         self.Gain = FakeNode(minimum=0.0, maximum=48.0)
 
         self.GammaEnable = FakeNode()
         self.Gamma = FakeNode(minimum=0.25, maximum=4.0)
+
+        self.BlackLevelClampingEnable = FakeNode(False)
 
         self.BlackLevelSelector = FakeNode()
         self.BlackLevel = FakeNode(minimum=0.0, maximum=100.0)
@@ -128,17 +138,31 @@ class FakeCamera:
         self.BalanceRatioSelector = FakeNode()
         self.BalanceRatio = FakeNode(minimum=0.0, maximum=10.0)
 
-        self.acquisition_mode = FakeEnumNode()
+        self.SharpeningEnable = FakeNode(False)
+        self.GevSCPSPacketSize = FakeNode(1500, minimum=0, maximum=10_000_000)
+        self.DeviceLinkThroughputLimit = FakeNode(
+            10_000_000,
+            minimum=0,
+            maximum=100_000_000,
+        )
+        self.TriggerMode = FakeEnumNode()
+        self.TriggerSource = FakeEnumNode()
+
+        self.AcquisitionMode = FakeEnumNode()
         self.stream_buffer_mode = FakeEnumNode()
+        self.stream_buffer_count_mode = FakeEnumNode()
+        self.stream_buffer_count_manual = FakeNode(10, minimum=1, maximum=10_000)
 
         self.node_map = FakeNodeMap(
             {
-                "AcquisitionMode": self.acquisition_mode,
+                "AcquisitionMode": self.AcquisitionMode,
             }
         )
         self.stream_node_map = FakeNodeMap(
             {
                 "StreamBufferHandlingMode": self.stream_buffer_mode,
+                "StreamBufferCountMode": self.stream_buffer_count_mode,
+                "StreamBufferCountManual": self.stream_buffer_count_manual,
             }
         )
         self.tl_device_node_map = FakeNodeMap(
@@ -167,6 +191,24 @@ class FakeCamera:
 
     def EndAcquisition(self):
         self.events.append("end")
+
+
+class FakeCameraController:
+    def __init__(self, camera_index, camera_settings):
+        self.cam = camera_index
+        self.camera_settings = camera_settings
+
+    def apply_settings(self):
+        self.camera_settings.apply(self.cam, strict=True)
+
+    def _begin_acquisition(self):
+        self.cam.BeginAcquisition()
+
+    def _end_acquisition(self):
+        self.cam.EndAcquisition()
+
+    def _execute_software_trigger(self):
+        pass
 
 
 class FakeImageArtist:
@@ -212,8 +254,35 @@ def make_fake_pyspin():
     class SpinnakerException(Exception):
         pass
 
+    class FakeCameraList:
+        def __init__(self, cameras=None):
+            self.cameras = list(cameras or [])
+
+        def GetSize(self):
+            return len(self.cameras)
+
+        def GetByIndex(self, index):
+            return self.cameras[index]
+
+        def Clear(self):
+            self.cameras.clear()
+
+    class FakeSystem:
+        def __init__(self, cameras=None):
+            self.cameras = FakeCameraList(cameras)
+
+        def GetCameras(self):
+            return self.cameras
+
+        def ReleaseInstance(self):
+            pass
+
+    fake.FakeCameraList = FakeCameraList
+    fake.FakeSystem = FakeSystem
     fake.SpinnakerException = SpinnakerException
     fake.Camera = object
+    fake.System = types.SimpleNamespace(GetInstance=lambda: FakeSystem())
+    fake.CameraList = object
 
     fake.IsAvailable = lambda node: node is not None and getattr(node, "available", True)
     fake.IsReadable = lambda node: node is not None and getattr(node, "readable", True)
@@ -223,6 +292,7 @@ def make_fake_pyspin():
     fake.CStringPtr = lambda node: node
     fake.CFloatPtr = lambda node: node
     fake.CBooleanPtr = lambda node: node
+    fake.CIntegerPtr = lambda node: node
 
     # QuickSpin enum constants used by FLIRCameraSettings.apply(...)
     fake.PixelFormat_Mono8 = "PixelFormat_Mono8"
@@ -251,7 +321,35 @@ def make_fake_pyspin():
     fake.BalanceRatioSelector_Blue = "BalanceRatioSelector_Blue"
     fake.BalanceRatioSelector_Red = "BalanceRatioSelector_Red"
 
+    fake.TriggerMode_Off = "TriggerMode_Off"
+    fake.TriggerMode_On = "TriggerMode_On"
+    fake.TriggerSource_Software = "TriggerSource_Software"
+
     return fake
+
+
+def make_fake_matplotlib():
+    fake_matplotlib = types.ModuleType("matplotlib")
+    fake_pyplot = types.ModuleType("matplotlib.pyplot")
+
+    def fake_subplots():
+        return FakeFigure(), FakeAxis()
+
+    fake_pyplot.subplots = fake_subplots
+    fake_pyplot.pause = lambda _dt: None
+    fake_pyplot.close = lambda _fig: None
+    fake_matplotlib.pyplot = fake_pyplot
+
+    return fake_matplotlib, fake_pyplot
+
+
+@pytest.fixture(autouse=True)
+def fake_external_dependencies(monkeypatch):
+    fake_matplotlib, fake_pyplot = make_fake_matplotlib()
+
+    monkeypatch.setitem(sys.modules, "PySpin", make_fake_pyspin())
+    monkeypatch.setitem(sys.modules, "matplotlib", fake_matplotlib)
+    monkeypatch.setitem(sys.modules, "matplotlib.pyplot", fake_pyplot)
 
 
 @pytest.fixture()
@@ -266,6 +364,7 @@ def modules(monkeypatch):
 
     camera_settings = importlib.import_module("camera_settings")
     calibration = importlib.import_module(MODULE_NAME)
+    monkeypatch.setattr(calibration, "FLIRCameraControllerBase", FakeCameraController)
 
     return calibration, camera_settings
 
@@ -344,7 +443,7 @@ def test_calibration_uses_real_flir_camera_settings_and_writes_json(
 
     assert isinstance(result.Settings, camera_settings.FLIRCameraSettings)
 
-    assert result.Settings.PixelFormat == "Mono16"
+    assert result.Settings.PixelFormat == "Mono8"
     assert result.Settings.ExposureAuto == "Off"
     assert result.Settings.ExposureMode == "Timed"
     assert result.Settings.ExposureTime == 1000.0
@@ -353,7 +452,7 @@ def test_calibration_uses_real_flir_camera_settings_and_writes_json(
     assert result.Settings.GammaEnable is False
 
     # Verify real FLIRCameraSettings.apply(...) touched the fake QuickSpin nodes.
-    assert cam.PixelFormat.value == "PixelFormat_Mono16"
+    assert cam.PixelFormat.value == "PixelFormat_Mono8"
     assert cam.ExposureAuto.value == "ExposureAuto_Off"
     assert cam.ExposureMode.value == "ExposureMode_Timed"
     assert cam.ExposureTime.set_calls == [1000.0]
@@ -364,7 +463,7 @@ def test_calibration_uses_real_flir_camera_settings_and_writes_json(
     assert output_path.exists()
     saved = json.loads(output_path.read_text())
     assert saved["CameraModel"] == "BFS-PGE-31S4M"
-    assert saved["PixelFormat"] == "Mono16"
+    assert saved["PixelFormat"] == "Mono8"
     assert saved["ExposureAuto"] == "Off"
     assert saved["ExposureMode"] == "Timed"
     assert saved["ExposureTime"] == 1000.0
@@ -376,7 +475,7 @@ def test_calibration_uses_real_flir_camera_settings_and_writes_json(
     assert result.LastMax == 4
     assert result.LastSaturatedPixels == 0
 
-    assert cam.acquisition_mode.entries_requested == ["Continuous"]
+    assert cam.AcquisitionMode.entries_requested == ["Continuous"]
     assert cam.stream_buffer_mode.entries_requested == ["NewestOnly"]
     assert cam.events == ["begin", "get:123", "end"]
 
@@ -468,3 +567,44 @@ def test_plus_and_minus_keys_update_real_settings_result(
 
     # Initial apply, then '+', then '-'
     assert cam.ExposureTime.set_calls == [1000.0, 2000.0, 500.0]
+
+def test_exposure_calibration_config_saturation_threshold():
+    from calibration import ExposureCalibrationConfig
+
+    config = ExposureCalibrationConfig(PixelFormat="Mono8")
+    assert config.SaturationThreshold == 255
+
+    config = ExposureCalibrationConfig(PixelFormat="Mono10")
+    assert config.SaturationThreshold == 1023
+
+    config = ExposureCalibrationConfig(PixelFormat="Mono12")
+    assert config.SaturationThreshold == 4095
+
+    config = ExposureCalibrationConfig(PixelFormat="Mono16")
+    assert config.SaturationThreshold == 65535
+
+    with pytest.raises(ValueError):
+        config = ExposureCalibrationConfig(PixelFormat="Mono12Packed")
+        _ = config.SaturationThreshold
+
+def test_image_is_overexposed(monkeypatch):
+    from calibration import ExposureCalibrationConfig, image_is_overexposed
+
+    config = ExposureCalibrationConfig(
+        PixelFormat="Mono8",
+        AllowedSaturatedPixels=0,
+    )
+
+    # Image with no saturated pixels
+    arr1 = np.array([[0, 1], [2, 3]], dtype=np.uint8)
+    is_overexposed, max_value, saturated_pixels = image_is_overexposed(arr1, config)
+    assert not is_overexposed
+    assert max_value == 3
+    assert saturated_pixels == 0
+
+    # Image with some saturated pixels
+    arr2 = np.array([[0, 255], [255, 3]], dtype=np.uint8)
+    is_overexposed, max_value, saturated_pixels = image_is_overexposed(arr2, config)
+    assert is_overexposed
+    assert max_value == 255
+    assert saturated_pixels == 2
