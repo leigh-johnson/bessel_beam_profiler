@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
+import datetime as dt
 
 import click
 
@@ -25,7 +25,7 @@ def calibrate() -> None:
 @click.option(
     "--output",
     "output_json_path",
-    default=Path("data/calibrations/calibrated_camera_settings.json"),
+    default=Path(f"calibrations/calibrated_camera_settings_{dt.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.json"),
     type=click.Path(dir_okay=False, path_type=Path),
     help="Where to save the calibrated camera settings JSON.",
 )
@@ -56,7 +56,7 @@ def calibrate() -> None:
 )
 @click.option(
     "--pixel-format",
-    default="Mono16",
+    default="Mono8",
     show_default=True,
     type=click.Choice(["Mono8", "Mono16"]),
     help="Pixel format used to choose the saturation threshold.",

@@ -118,7 +118,7 @@ class FakeCamera:
         self.ExposureMode = FakeNode()
         self.ExposureTime = FakeNode(minimum=25.0, maximum=1_000_000.0)
 
-        self.AcquisitionFrameRatePersistance = FakeNode(True)
+        self.AcquisitionFrameRatePersistence = FakeNode(True)
         self.AcquisitionMode = FakeEnumNode()
         self.AcquisitionFrameRateEnable = FakeNode(True)
         self.AcquisitionFrameRate = FakeNode(1.0, minimum=0.0, maximum=1_000_000.0)

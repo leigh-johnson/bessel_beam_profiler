@@ -82,7 +82,7 @@ class FLIRCameraSettings:
     AcquisitionMode: str = "Continuous"
     AcquisitionFrameRateEnable: bool = True
     AcquisitionFrameRate: float = 1.0 # frames per second, e.g. 1.0
-    AcquisitionFrameRatePersistance: bool = True
+    AcquisitionFrameRatePersistence: bool = True
 
     # Black level / DC offset
     BlackLevelClampingEnable: Optional[bool] = False
@@ -177,7 +177,7 @@ class FLIRCameraSettings:
             AcquisitionMode=_get_enum(cam, "AcquisitionMode", default="Continuous"),
             AcquisitionFrameRateEnable=_get_bool(cam, "AcquisitionFrameRateEnable", default=True),
             AcquisitionFrameRate=_get_float(cam, "AcquisitionFrameRate", default=1.0),
-            AcquisitionFrameRatePersistance=_get_bool(cam, "AcquisitionFrameRatePersistance", default=True),
+            AcquisitionFrameRatePersistence=_get_bool(cam, "AcquisitionFrameRatePersistence", default=True),
             CameraModel=_read_tl_string(cam, "DeviceModelName", default=""),
             PixelFormat=_get_enum(cam, "PixelFormat", default=None),
             ExposureAuto=_get_enum(cam, "ExposureAuto", default=None),
@@ -271,11 +271,11 @@ class FLIRCameraSettings:
                 )
 
         # Acquisition mode & frame rate
-        if self.AcquisitionFrameRatePersistance is not None:
+        if self.AcquisitionFrameRatePersistence is not None:
             _set_bool(
                 cam,
-                "AcquisitionFrameRatePersistance",
-                self.AcquisitionFrameRatePersistance,
+                "AcquisitionFrameRatePersistence",
+                self.AcquisitionFrameRatePersistence,
                 strict,
                 messages,
             )
