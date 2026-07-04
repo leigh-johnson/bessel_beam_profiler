@@ -33,7 +33,7 @@ class ExposureCalibrationConfig:
     ReductionFactor: float = 0.75
     IncreaseFactor: float = 1.25
 
-    AcquisitionTimeout_ms: int = 1000
+    AcquisitionTimeout_ms: int = 10000
     DisplayPause_s: float = 0.001
 
     @property
@@ -61,8 +61,7 @@ class ExposureCalibrationResult:
 def calibrate_exposure_interactive(
    camera_index: int,
     base_settings: FLIRCameraSettings,
-    *,
-    output_json_path: Optional[str | Path] = None,
+    output_json_path: Path,
     config: ExposureCalibrationConfig = ExposureCalibrationConfig(),
 ) -> ExposureCalibrationResult:
     """
@@ -152,7 +151,8 @@ def calibrate_exposure_interactive(
     try:
         while state["running"]:
             flir_camera_controller._execute_software_trigger()
-            image_result = flir_camera_controller.cam.GetNextImage(config.AcquisitionTimeout_ms)
+            timeout_ms = int(config.AcquisitionTimeout_ms + (state["exposure_us"] / 1000))
+            image_result = flir_camera_controller.cam.GetNextImage(timeout_ms)
 
             try:
                 if image_result.IsIncomplete():
@@ -211,25 +211,29 @@ def calibrate_exposure_interactive(
 
             fig.canvas.draw_idle()
             plt.pause(config.DisplayPause_s)
-
+            flir_camera_controller._execute_software_trigger()
             if state["save_requested"]:
                 current_settings = replace(
                     settings,
                     ExposureTime=state["exposure_us"],
                 )
-                if output_json_path is None:
-                    path = Path("calibrated_camera_settings.json")
-                else:
-                    path = Path(output_json_path)
 
-                current_settings.to_json_file(path)
-                print(f"Saved: {path}")
+                current_settings.to_json_file(output_json_path)
+                print(f"Saved: {output_json_path}")
+
+                plt.savefig(output_json_path.with_suffix(".png"))
+                print(f"Saved: {output_json_path.with_suffix('.png')}")
                 state["save_requested"] = False
+            
+                plt.savefig(output_json_path.with_suffix(".png"))
+                print(f"Saved: {output_json_path.with_suffix('.png')}")
 
     finally:
         try:
             flir_camera_controller._end_acquisition()
         finally:
+            plt.savefig(output_json_path.with_suffix(".png"))
+            print(f"Saved: {output_json_path.with_suffix('.png')}")
             plt.close(fig)
 
     final_settings = replace(
@@ -237,8 +241,7 @@ def calibrate_exposure_interactive(
         ExposureTime=state["exposure_us"],
     )
 
-    if output_json_path is not None:
-        final_settings.to_json_file(output_json_path)
+    final_settings.to_json_file(output_json_path)
 
     return ExposureCalibrationResult(
         Settings=final_settings,

@@ -81,7 +81,7 @@ class FLIRCameraSettings:
     # Continuous mode, then captures exactly one frame per TriggerSoftware.Execute().
     AcquisitionMode: str = "Continuous"
     AcquisitionFrameRateEnable: bool = True
-    AcquisitionFrameRate: float = 1.0 # frames per second, e.g. 1.0
+    AcquisitionFrameRate: float = 3.0 # frames per second
     AcquisitionFrameRatePersistence: bool = True
 
     # Black level / DC offset
