@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Optional
-import time
+import logging
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -11,6 +11,11 @@ import PySpin
 
 from camera_settings import FLIRCameraSettings, PixelFormatName
 from camera_base import FLIRCameraControllerBase
+
+logger = logging.getLogger(__name__)
+
+class OverexposedError(RuntimeError):
+    pass
 
 
 @dataclass(frozen=True)
@@ -162,8 +167,7 @@ def calibrate_exposure_interactive(
             finally:
                 image_result.Release()
 
-            max_value = int(np.max(arr))
-            saturated_pixels = int(np.sum(arr >= config.SaturationThreshold))
+            is_overexposed, max_value, saturated_pixels = image_is_overexposed(arr, config, strict=False)
 
             state["last_max"] = max_value
             state["last_saturated"] = saturated_pixels
@@ -261,3 +265,31 @@ def _set_exposure_us(
 def _clamp(x: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, x))
 
+def image_is_overexposed(image: np.ndarray, config: ExposureCalibrationConfig, strict=False) -> tuple[bool, int, int]:
+    """
+    Check if the calibration image is saturated due to overexposure.
+    strict: If True, raise an OverexposedError if the image is saturated. If False, log a debug message instead.
+
+    Raises:
+        OverexposedError: If the image is saturated.
+    """
+    max_value = int(np.max(image))
+    saturated_pixels = int(np.sum(image >= config.SaturationThreshold))
+
+    if saturated_pixels > config.AllowedSaturatedPixels:
+        if strict:
+            raise OverexposedError(
+                f"Calibration image is saturated: "
+                f"max = {max_value}, "
+                f"saturated pixels = {saturated_pixels}, "
+                f"allowed = {config.AllowedSaturatedPixels}"
+            )
+        else:
+            logger.debug(
+                f"Calibration image is saturated: "
+                f"max = {max_value}, "
+                f"saturated pixels = {saturated_pixels}, "
+                f"allowed = {config.AllowedSaturatedPixels}"
+            )
+            return True, max_value, saturated_pixels
+    return False, max_value, saturated_pixels
