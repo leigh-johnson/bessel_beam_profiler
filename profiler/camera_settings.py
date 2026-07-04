@@ -23,6 +23,7 @@ AUTO_MODES = {"Off", "Once", "Continuous"}
 EXPOSURE_MODES = {"Timed", "TriggerWidth"}
 PIXEL_FORMATS = {"Mono8", "Mono10p", "Mono12p", "Mono12Packed", "Mono16"}
 STREAM_BUFFER_HANDLING_MODES = {"NewestFirst", "OldestFirst", "OldestFirstOverwrite"}
+ACQUISITION_MODES = {"SingleFrame", "MultiFrame", "Continuous"}
 
 class CameraSettingError(RuntimeError):
     pass
@@ -81,8 +82,19 @@ class FLIRCameraSettings:
     AcquisitionMode: str = "Continuous"
     AcquisitionFrameRateEnable: bool = True
     AcquisitionFrameRate: float = 1.0 # frames per second, e.g. 1.0
+    AcquisitionFrameRatePersistance: bool = True
 
-    TriggerSource: str = "Software"
+    # Black level / DC offset
+    BlackLevelClampingEnable: Optional[bool] = False
+    BlackLevelSelector: Optional[str] = "All"
+    BlackLevel: Optional[float] = None
+
+    # White balance / color channel ratios for RGB-Bayer sensors.
+    # I don't think we need these for monochrome cameras, but included here for completeness since we have a few color cameras in the lab. 
+    # Leave these as None for BFS-PGE-31S4M.
+    BalanceWhiteAuto: Optional[AutoMode] = None
+    BalanceRatioBlue: Optional[float] = None
+    BalanceRatioRed: Optional[float] = None
 
     CameraModel: str = "" # e.g. BFS-PGE-31S4M
 
@@ -107,21 +119,15 @@ class FLIRCameraSettings:
     GammaEnable: Optional[bool] = False
     Gamma: Optional[float] = 1.0
 
-    # Black level / DC offset
-    BlackLevelSelector: Optional[str] = "All"
-    BlackLevel: Optional[float] = None
-
-    # White balance / color channel ratios for RGB-Bayer sensors.
-    # I don't think we need these for monochrome cameras, but included here for completeness since we have a few color cameras in the lab. 
-    # Leave these as None for BFS-PGE-31S4M.
-    BalanceWhiteAuto: Optional[AutoMode] = None
-    BalanceRatioBlue: Optional[float] = None
-    BalanceRatioRed: Optional[float] = None
+    SharpeningEnable: Optional[bool] = False
 
     StreamBufferCountManual: Optional[int] = 10
     StreamBufferHandlingMode: Optional[str] = "NewestFirst"
     StreamBufferCountMode: Optional[str] = "Manual"
     DeviceLinkThroughputLimit: Optional[int] = 10_000_000 # bits
+
+    TriggerSource: str = "Software"
+
 
     def __post_init__(self) -> None:
         # validate settings
@@ -131,6 +137,7 @@ class FLIRCameraSettings:
         _check_choice("ExposureMode", self.ExposureMode, EXPOSURE_MODES)
         _check_choice("PixelFormat", self.PixelFormat, PIXEL_FORMATS)
         _check_choice("StreamBufferHandlingMode", self.StreamBufferHandlingMode, STREAM_BUFFER_HANDLING_MODES)
+        _check_choice("AcquisitionMode", self.AcquisitionMode, ACQUISITION_MODES)
 
 
         if self.ExposureTime is not None and self.ExposureTime <= 0:
@@ -167,8 +174,10 @@ class FLIRCameraSettings:
         """
 
         return cls(
+            AcquisitionMode=_get_enum(cam, "AcquisitionMode", default="Continuous"),
             AcquisitionFrameRateEnable=_get_bool(cam, "AcquisitionFrameRateEnable", default=True),
             AcquisitionFrameRate=_get_float(cam, "AcquisitionFrameRate", default=1.0),
+            AcquisitionFrameRatePersistance=_get_bool(cam, "AcquisitionFrameRatePersistance", default=True),
             CameraModel=_read_tl_string(cam, "DeviceModelName", default=""),
             PixelFormat=_get_enum(cam, "PixelFormat", default=None),
             ExposureAuto=_get_enum(cam, "ExposureAuto", default=None),
@@ -179,8 +188,9 @@ class FLIRCameraSettings:
             GammaEnable=_get_bool(cam, "GammaEnable", default=None),
             Gamma=_get_float(cam, "Gamma", default=None),
             GevSCPSPacketSize=_get_float(cam, "GevSCPSPacketSize", default=1500),
-            BlackLevelSelector=_get_enum(cam, "BlackLevelSelector", default=None),
             BlackLevel=_get_float(cam, "BlackLevel", default=None),
+            BlackLevelClampingEnable=_get_bool(cam, "BlackLevelClampingEnable", default=False),
+            BlackLevelSelector=_get_enum(cam, "BlackLevelSelector", default=None),
             BalanceWhiteAuto=_get_enum(cam, "BalanceWhiteAuto", default=None),
             BalanceRatioBlue=_get_selected_float(
                 cam,
@@ -196,6 +206,7 @@ class FLIRCameraSettings:
                 value_feature="BalanceRatio",
                 default=None,
             ),
+            SharpeningEnable=_get_bool(cam, "SharpeningEnable", default=False),
             StreamBufferCountManual=_get_integer(cam, "StreamBufferCountManual", default=10),
             StreamBufferHandlingMode=_get_enum(cam, "StreamBufferHandlingMode", default="NewestFirst"),
             StreamBufferCountMode=_get_enum(cam, "StreamBufferCountMode", default="Manual"),
@@ -259,7 +270,23 @@ class FLIRCameraSettings:
                     "ExposureTime was not applied because ExposureAuto is not Off."
                 )
 
-        # Acquisition frame rate
+        # Acquisition mode & frame rate
+        if self.AcquisitionFrameRatePersistance is not None:
+            _set_bool(
+                cam,
+                "AcquisitionFrameRatePersistance",
+                self.AcquisitionFrameRatePersistance,
+                strict,
+                messages,
+            )
+        if self.AcquisitionMode is not None:
+            _set_enum(
+                cam,
+                "AcquisitionMode",
+                self.AcquisitionMode,
+                strict,
+                messages,
+            )
         if self.AcquisitionFrameRateEnable is not None:
             _set_bool(
                 cam,
@@ -292,6 +319,14 @@ class FLIRCameraSettings:
             _set_float(cam, "Gamma", self.Gamma, strict, messages)
 
         # Black level
+        if self.BlackLevelClampingEnable is not None:
+            _set_bool(
+                cam,
+                "BlackLevelClampingEnable",
+                self.BlackLevelClampingEnable,
+                strict,
+                messages,
+            )
         if self.BlackLevel is not None:
             if self.BlackLevelSelector is not None:
                 _set_enum(
@@ -318,6 +353,9 @@ class FLIRCameraSettings:
                 _set_enum(cam, "BalanceWhiteAuto", "Off", strict, messages)
             _set_enum(cam, "BalanceRatioSelector", "Red", strict, messages)
             _set_float(cam, "BalanceRatio", self.BalanceRatioRed, strict, messages)
+
+        if self.SharpeningEnable is not None:
+            _set_bool(cam, "SharpeningEnable", self.SharpeningEnable, strict, messages)
 
         # Stream buffer settings
         # These are set using s_node_map = cam.GetTLStreamNodeMap()

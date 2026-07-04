@@ -7,63 +7,25 @@ from typing import Iterator
 import click
 
 
-@contextmanager
-def _open_camera(camera_index: int) -> Iterator[object]:
-    import PySpin
-
-    system = PySpin.System.GetInstance()
-    cam_list = system.GetCameras()
-    cam = None
-
-    try:
-        num_cameras = cam_list.GetSize()
-
-        if num_cameras == 0:
-            raise click.ClickException("No FLIR cameras detected.")
-
-        if camera_index >= num_cameras:
-            raise click.ClickException(
-                f"Requested camera index {camera_index}, "
-                f"but only {num_cameras} camera(s) were detected."
-            )
-
-        cam = cam_list.GetByIndex(camera_index)
-        cam.Init()
-
-        yield cam
-
-    finally:
-        if cam is not None:
-            try:
-                cam.DeInit()
-            except PySpin.SpinnakerException as ex:
-                click.echo(f"Warning: camera de-init failed: {ex}", err=True)
-
-            del cam
-
-        cam_list.Clear()
-        system.ReleaseInstance()
-
-
-@click.group(name="calibration")
-def calibration() -> None:
+@click.group(name="calibrate")
+def calibrate() -> None:
     """
     Interactive camera calibration routines.
     """
 
 
-@calibration.command("exposure")
+@calibrate.command("exposure")
 @click.option(
     "--camera-settings",
     "camera_settings_path",
-    required=True,
+    required=False,
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
     help="Path to a base FLIRCameraSettings JSON file.",
 )
 @click.option(
     "--output",
     "output_json_path",
-    required=True,
+    default=Path("data/calibrations/calibrated_camera_settings.json"),
     type=click.Path(dir_okay=False, path_type=Path),
     help="Where to save the calibrated camera settings JSON.",
 )
@@ -132,7 +94,11 @@ def exposure(
     if min_exposure_us > max_exposure_us:
         raise click.ClickException("--min-exposure-us cannot exceed --max-exposure-us.")
 
-    base_settings = FLIRCameraSettings.from_json_file(camera_settings_path)
+    if camera_settings_path is not None:
+        base_settings = FLIRCameraSettings.from_json_file(camera_settings_path)
+    else:
+        # use default settings if no camera settings file is provided
+        base_settings = FLIRCameraSettings()
 
     config = ExposureCalibrationConfig(
         InitialExposure_us=initial_exposure_us,
@@ -143,13 +109,13 @@ def exposure(
         AcquisitionTimeout_ms=acquisition_timeout_ms,
     )
 
-    with _open_camera(camera_index) as cam:
-        result = calibrate_exposure_interactive(
-            cam=cam,
-            base_settings=base_settings,
-            output_json_path=output_json_path,
-            config=config,
-        )
+    print(f"Starting exposure calibration with config: {config}")
+    result = calibrate_exposure_interactive(
+        camera_index=camera_index,
+        base_settings=base_settings,
+        output_json_path=output_json_path,
+        config=config,
+    )
 
     click.echo(f"Final exposure: {result.FinalExposure_us:.3f} us")
     click.echo(f"Last max pixel value: {result.LastMax}")

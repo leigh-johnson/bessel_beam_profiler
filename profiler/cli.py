@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import click
 
-from calibration_cli import calibration
+from calibration_cli import calibrate
 from dataset_writer_cli import dataset
 
 
@@ -14,7 +14,7 @@ def cli() -> None:
 
 
 cli.add_command(dataset)
-cli.add_command(calibration)
+cli.add_command(calibrate)
 
 
 if __name__ == "__main__":

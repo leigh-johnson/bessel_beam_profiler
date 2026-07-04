@@ -16,6 +16,7 @@ import PySpin
 from camera_settings import FLIRCameraSettings
 from coordinates import ScanPoint, Vec3D
 
+from camera_base import FLIRCameraControllerBase
 
 system = PySpin.System.GetInstance()
 
@@ -151,43 +152,8 @@ class FrameRecord:
 
     Extra: dict[str, Any] = field(default_factory=dict)
 
-def _open_camera(camera_index: int) -> PySpin.Camera:
 
-    system = PySpin.System.GetInstance()
-    cam_list = system.GetCameras()
-    cam = None
-
-    num_cameras = cam_list.GetSize()
-
-    if num_cameras == 0:
-        raise Exception("No FLIR cameras detected.")
-
-    if camera_index >= num_cameras:
-        raise Exception(
-            f"Requested camera index {camera_index}, "
-            f"but only {num_cameras} camera(s) were detected."
-        )
-
-    cam = cam_list.GetByIndex(camera_index)
-    cam.Init()
-
-    return cam
-
-
-def _close_camera(cam: PySpin.Camera) -> None:
-    """
-    De-initialize and release a PySpin camera instance.
-
-    This is a separate function so that we can call it in a finally block
-    without having to check if cam is None.
-    """
-
-    cam_list = system.GetCameras()
-    cam.DeInit()
-    cam_list.Clear()
-
-
-class FLIRDatasetWriter:
+class FLIRDatasetWriter(FLIRCameraControllerBase):
     def __init__(
         self,
         camera_index: int,
@@ -197,8 +163,6 @@ class FLIRDatasetWriter:
         signals: Optional[AcquisitionSignals] = None,
     ):
         self.camera_index = camera_index
-        self.cam = _open_camera(camera_index)
-        self.camera_settings = camera_settings
         self.config = config
         self.stage_controller = stage_controller or StageController()
         self.signals = signals or AcquisitionSignals()
@@ -206,11 +170,7 @@ class FLIRDatasetWriter:
         self.run_dir = self.config.make_run_dir()
         self.manifest_path = self.run_dir / "frames.jsonl"
 
-    def __del__(self):
-        print("Cleaning up PySpin Camera and System instances...")
-        _close_camera(self.cam)
-        del self.cam
-        system.ReleaseInstance()
+        super().__init__(camera_index, camera_settings)
 
 
     def prepare_run(self) -> Path:
@@ -364,7 +324,7 @@ class FLIRDatasetWriter:
         if self.config.SettleTime_s > 0:
             time.sleep(self.config.SettleTime_s)
 
-        self.cam.BeginAcquisition()
+        self._begin_acquisition()
 
         try:
             for shot_idx in range(point.NShots):
@@ -418,6 +378,8 @@ class FLIRDatasetWriter:
 
             frame_path = self._frame_path(point, shot_idx)
             self._write_array(frame_path, arr)
+            frame_path_jpg = str(frame_path.with_suffix(".jpg"))
+            image_result.Save(frame_path_jpg)  # Save a PNG copy for quick viewing
             self.signals.FrameWritten.set()
 
             saturated_count = _estimate_saturated_pixel_count(arr)
@@ -478,43 +440,6 @@ class FLIRDatasetWriter:
         with self.manifest_path.open("a") as f:
             f.write(json.dumps(_dataclass_to_jsonable(record)) + "\n")
 
-
-    def _execute_software_trigger(self) -> None:
-        nodemap = self.cam.GetNodeMap()
-        command = PySpin.CCommandPtr(nodemap.GetNode("TriggerSoftware"))
-
-        if not PySpin.IsWritable(command):
-            raise DatasetWriterError("Unable to execute TriggerSoftware.")
-
-        command.Execute()
-
-    def _end_acquisition(self) -> None:
-        return self.cam.EndAcquisition()
-
-
-    def _set_acquisition_mode(self, mode: str) -> None:
-        """
-        Set AcquisitionMode using GenAPI.
-
-        The FLIR examples set AcquisitionMode by getting the enum node and then
-        selecting an entry like Continuous. We use the same pattern here.
-        """
-
-        nodemap = self.cam.GetNodeMap()
-        self._set_enum(nodemap, "AcquisitionMode", mode)
-
-    def _set_enum(self, nodemap: Any, node_name: str, entry_name: str) -> None:
-        node = PySpin.CEnumerationPtr(nodemap.GetNode(node_name))
-
-        if not PySpin.IsReadable(node) or not PySpin.IsWritable(node):
-            raise DatasetWriterError(f"Unable to access {node_name}.")
-
-        entry = node.GetEntryByName(entry_name)
-
-        if not PySpin.IsReadable(entry):
-            raise DatasetWriterError(f"{node_name} entry {entry_name!r} is not readable.")
-
-        node.SetIntValue(entry.GetValue())
 
 
 def _format_placement_id(placement_id: str) -> str:

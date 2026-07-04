@@ -10,6 +10,7 @@ import numpy as np
 import PySpin
 
 from camera_settings import FLIRCameraSettings, PixelFormatName
+from camera_base import FLIRCameraControllerBase
 
 
 @dataclass(frozen=True)
@@ -53,7 +54,7 @@ class ExposureCalibrationResult:
 
 
 def calibrate_exposure_interactive(
-    cam: PySpin.Camera,
+   camera_index: int,
     base_settings: FLIRCameraSettings,
     *,
     output_json_path: Optional[str | Path] = None,
@@ -78,18 +79,20 @@ def calibrate_exposure_interactive(
 
     settings = replace(
         base_settings,
-        PixelFormat="Mono16",
         ExposureAuto="Off",
         ExposureMode="Timed",
         ExposureTime=exposure_us,
         GainAuto="Off",
         Gain=0.0,
         GammaEnable=False,
+        PixelFormat=config.PixelFormat,
     )
 
-    settings.apply(cam, strict=True)
-    _set_acquisition_mode(cam, "Continuous")
-    _set_stream_buffer_handling_mode(cam, "NewestOnly")
+    print("Initializing camera controller")
+    flir_camera_controller = FLIRCameraControllerBase(camera_index, settings)
+    print(f"Applying camera settings: {settings}")
+
+    flir_camera_controller.apply_settings()
 
     state = {
         "running": True,
@@ -117,12 +120,12 @@ def calibrate_exposure_interactive(
         elif key in ("+", "="):
             state["auto_reduce"] = False
             new_exposure = state["exposure_us"] * config.IncreaseFactor
-            state["exposure_us"] = _set_exposure_us(cam, new_exposure, config)
+            state["exposure_us"] = _set_exposure_us(flir_camera_controller.cam, new_exposure, config)
 
         elif key in ("-", "_"):
             state["auto_reduce"] = False
             new_exposure = state["exposure_us"] * config.ReductionFactor
-            state["exposure_us"] = _set_exposure_us(cam, new_exposure, config)
+            state["exposure_us"] = _set_exposure_us(flir_camera_controller.cam, new_exposure, config)
 
         elif key == "s":
             state["save_requested"] = True
@@ -137,12 +140,14 @@ def calibrate_exposure_interactive(
         "  s       save current settings JSON\n"
         "  q/esc   accept and quit\n"
     )
-
-    cam.BeginAcquisition()
+    print("Beginning acquisition")
+    flir_camera_controller._begin_acquisition()
+    print(f"Starting exposure calibration with initial exposure = {state['exposure_us']:.3f} us")
 
     try:
         while state["running"]:
-            image_result = cam.GetNextImage(config.AcquisitionTimeout_ms)
+            flir_camera_controller._execute_software_trigger()
+            image_result = flir_camera_controller.cam.GetNextImage(config.AcquisitionTimeout_ms)
 
             try:
                 if image_result.IsIncomplete():
@@ -168,7 +173,7 @@ def calibrate_exposure_interactive(
                 and saturated_pixels > config.AllowedSaturatedPixels
             ):
                 new_exposure = state["exposure_us"] * config.ReductionFactor
-                state["exposure_us"] = _set_exposure_us(cam, new_exposure, config)
+                state["exposure_us"] = _set_exposure_us(flir_camera_controller.cam, new_exposure, config)
 
             elif (
                 state["auto_reduce"]
@@ -219,7 +224,7 @@ def calibrate_exposure_interactive(
 
     finally:
         try:
-            cam.EndAcquisition()
+            flir_camera_controller._end_acquisition()
         finally:
             plt.close(fig)
 
@@ -256,36 +261,3 @@ def _set_exposure_us(
 def _clamp(x: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, x))
 
-
-def _set_acquisition_mode(cam: PySpin.Camera, mode: str) -> None:
-    nodemap = cam.GetNodeMap()
-    node = PySpin.CEnumerationPtr(nodemap.GetNode("AcquisitionMode"))
-
-    if not PySpin.IsReadable(node) or not PySpin.IsWritable(node):
-        raise RuntimeError("Unable to access AcquisitionMode.")
-
-    entry = node.GetEntryByName(mode)
-
-    if not PySpin.IsReadable(entry):
-        raise RuntimeError(f"AcquisitionMode entry {mode!r} not readable.")
-
-    node.SetIntValue(entry.GetValue())
-
-
-def _set_stream_buffer_handling_mode(cam: PySpin.Camera, mode: str) -> None:
-    stream_nodemap = cam.GetTLStreamNodeMap()
-    node = PySpin.CEnumerationPtr(
-        stream_nodemap.GetNode("StreamBufferHandlingMode")
-    )
-
-    if not PySpin.IsReadable(node) or not PySpin.IsWritable(node):
-        print("StreamBufferHandlingMode not available; skipping.")
-        return
-
-    entry = node.GetEntryByName(mode)
-
-    if not PySpin.IsReadable(entry):
-        print(f"StreamBufferHandlingMode={mode!r} not readable; skipping.")
-        return
-
-    node.SetIntValue(entry.GetValue())
