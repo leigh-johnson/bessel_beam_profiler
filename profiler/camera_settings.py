@@ -119,8 +119,6 @@ class FLIRCameraSettings:
     GammaEnable: Optional[bool] = False
     Gamma: Optional[float] = 1.0
 
-    SharpeningEnable: Optional[bool] = False
-
     StreamBufferCountManual: Optional[int] = 10
     StreamBufferHandlingMode: Optional[str] = "NewestOnly"
     StreamBufferCountMode: Optional[str] = "Manual"
@@ -206,7 +204,6 @@ class FLIRCameraSettings:
                 value_feature="BalanceRatio",
                 default=None,
             ),
-            SharpeningEnable=_get_bool(cam, "SharpeningEnable", default=False),
             StreamBufferCountManual=_get_integer(cam, "StreamBufferCountManual", default=10),
             StreamBufferHandlingMode=_get_enum(cam, "StreamBufferHandlingMode", default="NewestFirst"),
             StreamBufferCountMode=_get_enum(cam, "StreamBufferCountMode", default="Manual"),
@@ -353,9 +350,6 @@ class FLIRCameraSettings:
                 _set_enum(cam, "BalanceWhiteAuto", "Off", strict, messages)
             _set_enum(cam, "BalanceRatioSelector", "Red", strict, messages)
             _set_float(cam, "BalanceRatio", self.BalanceRatioRed, strict, messages)
-
-        if self.SharpeningEnable is not None:
-            _set_bool(cam, "SharpeningEnable", self.SharpeningEnable, strict, messages)
 
         # Stream buffer settings
         # These are set using s_node_map = cam.GetTLStreamNodeMap()

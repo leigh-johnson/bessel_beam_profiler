@@ -137,8 +137,6 @@ class FakeCamera:
         self.BalanceWhiteAuto = FakeNode()
         self.BalanceRatioSelector = FakeNode()
         self.BalanceRatio = FakeNode(minimum=0.0, maximum=10.0)
-
-        self.SharpeningEnable = FakeNode(False)
         self.GevSCPSPacketSize = FakeNode(1500, minimum=0, maximum=10_000_000)
         self.DeviceLinkThroughputLimit = FakeNode(
             10_000_000,
