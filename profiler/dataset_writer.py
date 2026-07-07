@@ -18,7 +18,6 @@ from coordinates import ScanPoint, Vec3D
 
 from camera_base import FLIRCameraControllerBase
 
-system = PySpin.System.GetInstance()
 
 class DatasetWriterError(RuntimeError):
     pass
@@ -161,8 +160,11 @@ class FLIRDatasetWriter(FLIRCameraControllerBase):
         config: DatasetWriterConfig,
         stage_controller: Optional[StageController] = None,
         signals: Optional[AcquisitionSignals] = None,
+        cam: Optional[Any] = None,
     ):
+
         self.camera_index = camera_index
+        self.camera_settings = camera_settings
         self.config = config
         self.stage_controller = stage_controller or StageController()
         self.signals = signals or AcquisitionSignals()
@@ -170,7 +172,8 @@ class FLIRDatasetWriter(FLIRCameraControllerBase):
         self.run_dir = self.config.make_run_dir()
         self.manifest_path = self.run_dir / "frames.jsonl"
 
-        super().__init__(camera_index, camera_settings)
+        # `cam` allows dependency injection of a fake camera for unit tests.
+        super().__init__(camera_index, camera_settings, cam=cam)
 
 
     def prepare_run(self) -> Path:
@@ -376,33 +379,18 @@ class FLIRDatasetWriter(FLIRCameraControllerBase):
             # Force a detached NumPy copy before releasing the camera image pointer.
             arr = np.array(image_data, copy=True)
 
-            frame_path = self._frame_path(point, shot_idx)
-            self._write_array(frame_path, arr)
-            frame_path_jpg = str(frame_path.with_suffix(".jpg"))
-            image_result.Save(frame_path_jpg)  # Save a PNG copy for quick viewing
-            self.signals.FrameWritten.set()
-
-            saturated_count = _estimate_saturated_pixel_count(arr)
-
             extra = dict(point.Metadata)
 
             if hasattr(image_result, "GetFrameID"):
                 extra["FrameID"] = int(image_result.GetFrameID())
 
-            return FrameRecord(
-                Path=str(frame_path),
-                PlacementID=point.PlacementID,
-                GantryPosition_mm=point.GantryPosition_mm,
-                TablePosition_mm=point.TablePosition_mm,
-                ShotIndex=shot_idx,
-                TimestampUTC=_utc_now(),
-                Shape=tuple(arr.shape),
-                DType=str(arr.dtype),
-                Min=int(np.min(arr)),
-                Max=int(np.max(arr)),
-                SaturatedPixelCount=saturated_count,
-                Extra=extra,
-            )
+            frame_path = self._frame_path(point, shot_idx)
+            self._write_array(frame_path, arr)
+            frame_path_jpg = str(frame_path.with_suffix(".jpg"))
+            image_result.Save(frame_path_jpg)  # Save a JPG copy for quick viewing
+            self.signals.FrameWritten.set()
+
+            return self._build_frame_record(arr, frame_path, point, shot_idx, extra)
 
         except PySpin.SpinnakerException as ex:
             raise DatasetWriterError(f"Spinnaker acquisition failed: {ex}") from ex
@@ -410,6 +398,58 @@ class FLIRDatasetWriter(FLIRCameraControllerBase):
         finally:
             if image_result is not None:
                 image_result.Release()
+
+    def save_frame_array(
+        self,
+        arr: np.ndarray,
+        point: ScanPoint,
+        shot_idx: int = 0,
+        extra: Optional[dict[str, Any]] = None,
+    ) -> FrameRecord:
+        """
+        Save an already-acquired NumPy frame to disk and append it to the
+        manifest, without touching the camera.
+
+        This is used by the manual translation-stage mode, where frames are
+        grabbed continuously for a live preview and the user chooses which
+        one to keep. The manifest record is identical in schema to frames
+        acquired by acquire_scan / acquire_static.
+        """
+
+        merged_extra = {**dict(point.Metadata), **(extra or {})}
+
+        frame_path = self._frame_path(point, shot_idx)
+        self._write_array(frame_path, np.asarray(arr))
+
+        record = self._build_frame_record(
+            np.asarray(arr), frame_path, point, shot_idx, merged_extra
+        )
+        self._append_manifest(record)
+
+        return record
+
+    def _build_frame_record(
+        self,
+        arr: np.ndarray,
+        frame_path: Path,
+        point: ScanPoint,
+        shot_idx: int,
+        extra: dict[str, Any],
+    ) -> FrameRecord:
+        return FrameRecord(
+            Path=str(frame_path),
+            PlacementID=point.PlacementID,
+            GantryPosition_mm=point.GantryPosition_mm,
+            TablePosition_mm=point.TablePosition_mm,
+            ShotIndex=shot_idx,
+            TimestampUTC=_utc_now(),
+            Shape=tuple(arr.shape),
+            DType=str(arr.dtype),
+            Min=int(np.min(arr)),
+            Max=int(np.max(arr)),
+            SaturatedPixelCount=_estimate_saturated_pixel_count(arr),
+            Extra=extra,
+        )
 
     def _frame_path(self, point: ScanPoint, shot_idx: int) -> Path:
         filename = (

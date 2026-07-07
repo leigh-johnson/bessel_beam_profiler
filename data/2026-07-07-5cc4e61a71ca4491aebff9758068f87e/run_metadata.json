@@ -1,0 +1,17 @@
+{
+  "CreatedUTC": "2026-07-07T21:10:58.148036+00:00",
+  "RunDir": "/Users/leigh/edu/Kolkowitz-Sr/Pi2Su26/bessel_beam_simulator/data/2026-07-07-5cc4e61a71ca4491aebff9758068f87e",
+  "Config": {
+    "DatasetRoot": "/Users/leigh/edu/Kolkowitz-Sr/Pi2Su26/bessel_beam_simulator/data",
+    "AcquisitionTimeout_ms": 2000,
+    "StageTimeout_s": 30.0,
+    "SettleTime_s": 0.0,
+    "ImageExtension": ".npy",
+    "RunUUID": "5cc4e61a71ca4491aebff9758068f87e"
+  },
+  "CoordinateConvention": {
+    "GantryPosition_mm": "Local CNC/gantry coordinates used for motion commands.",
+    "TablePosition_mm": "Optics-table / beamline coordinates used for reconstruction.",
+    "PlacementID": "Physical placement of the CNC gantry on the optics table."
+  }
+}

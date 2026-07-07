@@ -111,6 +111,10 @@ class FakeImage:
     def GetFrameID(self):
         return self.frame_id
 
+    def Save(self, path):
+        self.saved_paths = getattr(self, "saved_paths", [])
+        self.saved_paths.append(path)
+
     def Release(self):
         self.released = True
 

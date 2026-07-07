@@ -1,3 +1,5 @@
+from __future__ import annotations  # avoid evaluating PySpin type hints at import time
+
 import PySpin
 import gc
 
@@ -47,8 +49,19 @@ class FLIRCameraControllerBase:
     It provides common functionality for all FLIR camera types.
     """
 
-    def __init__(self, camera_index: int, camera_settings: FLIRCameraSettings) -> None:
-        self.system, self.cam_list, self.cam = _open_camera(camera_index)
+    def __init__(
+        self,
+        camera_index: int,
+        camera_settings: FLIRCameraSettings,
+        cam=None,
+    ) -> None:
+        if cam is not None:
+            # Dependency injection for unit tests: use the provided camera
+            # object and skip PySpin system/camera discovery entirely.
+            self.system, self.cam_list, self.cam = None, None, cam
+        else:
+            self.system, self.cam_list, self.cam = _open_camera(camera_index)
+
         self.camera_settings = camera_settings
 
     def __del__(self):
@@ -92,5 +105,7 @@ class FLIRCameraControllerBase:
         self.cam_list = None
         self.system = None
 
-        _close_camera(system, cam_list, cam)
+        if system is not None:
+            _close_camera(system, cam_list, cam)
+
         gc.collect()
