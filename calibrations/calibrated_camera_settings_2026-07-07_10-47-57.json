@@ -1,7 +1,7 @@
 {
   "AcquisitionMode": "Continuous",
   "AcquisitionFrameRateEnable": true,
-  "AcquisitionFrameRate": 10,
+  "AcquisitionFrameRate": 3,
   "AcquisitionFrameRatePersistence": true,
   "BlackLevelClampingEnable": false,
   "BlackLevelSelector": "All",
@@ -13,7 +13,7 @@
   "PixelFormat": "Mono8",
   "ExposureAuto": "Off",
   "ExposureMode": "Timed",
-  "ExposureTime": 33210.93865864526,
+  "ExposureTime": 24169.874737207996,
   "GevSCPSPacketSize": 1500,
   "GainAuto": "Off",
   "Gain": 0.0,
@@ -22,7 +22,7 @@
   "StreamBufferCountManual": 10,
   "StreamBufferHandlingMode": "NewestOnly",
   "StreamBufferCountMode": "Manual",
-  "DeviceLinkThroughputLimit": 100000000,
+  "DeviceLinkThroughputLimit": 10000000,
   "TriggerMode": "Off",
   "TriggerSource": null
 }

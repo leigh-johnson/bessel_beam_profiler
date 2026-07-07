@@ -80,7 +80,7 @@ class FLIRCameraSettings:
     # Continuous mode, then captures exactly one frame per TriggerSoftware.Execute().
     AcquisitionMode: str = "Continuous"
     AcquisitionFrameRateEnable: bool = True
-    AcquisitionFrameRate: float = 10 # frames per second
+    AcquisitionFrameRate: float = 3 # frames per second
     AcquisitionFrameRatePersistence: bool = True
 
     # Black level / DC offset
@@ -121,7 +121,7 @@ class FLIRCameraSettings:
     StreamBufferCountManual: Optional[int] = 10
     StreamBufferHandlingMode: Optional[str] = "NewestOnly"
     StreamBufferCountMode: Optional[str] = "Manual"
-    DeviceLinkThroughputLimit: Optional[int] = 100_000_000 # bits
+    DeviceLinkThroughputLimit: Optional[int] = 10_000_000 # bits
 
     TriggerMode: Optional[str] = "Off"
     TriggerSource: Optional[str] = None

@@ -29,6 +29,7 @@ class ExposureCalibrationConfig:
     PixelFormat: PixelFormatName = "Mono8"
 
     AllowedSaturatedPixels: int = 0
+    SaturationThresholdPercent: float = 0.70
 
     ReductionFactor: float = 0.95
     IncreaseFactor: float = 1.05
@@ -39,11 +40,11 @@ class ExposureCalibrationConfig:
     @property
     def SaturationThreshold(self) -> int:
         if self.PixelFormat == "Mono8":
-            return 255
+            return int(255 * self.SaturationThresholdPercent)
         elif self.PixelFormat == "Mono10":
-            return 1023
+            return int(1023 * self.SaturationThresholdPercent)
         elif self.PixelFormat == "Mono12":
-            return 4095
+            return int(4095 * self.SaturationThresholdPercent)
         elif self.PixelFormat == "Mono12Packed":
              # TODO I'm not messing with Mono12Packed bit-packed image format for now, since it uses non-linear mapping. See the FLIR Spinnaker SDK documentation for details. You're welcome to implement it, but know that it will require a different non-linear way of evaluating thesaturation threshold and a different way to unpack the pixel values.
             raise ValueError(f"Unsupported PixelFormat: {self.PixelFormat}. Implement ExposureCalibrationConfig.saturation_threshold for this PixelFormat.")
@@ -51,7 +52,7 @@ class ExposureCalibrationConfig:
         # Teledyne Mono16 always returns 1 for bits 14 and 15, so the maximum pixel value is 16383
         elif self.PixelFormat == "Mono16":
             # Mono16 requires additional re-scaling. 
-            ValueError(f"Unsupported PixelFormat: {self.PixelFormat}. Implement ExposureCalibrationConfig.saturation_threshold for this PixelFormat.")
+            raise ValueError(f"Unsupported PixelFormat: {self.PixelFormat}. Implement ExposureCalibrationConfig.saturation_threshold for this PixelFormat.")
         else:
             # TODO I'm not messing with Mono12Packed bit-packed image format for now, since it uses non-linear mapping. See the FLIR Spinnaker SDK documentation for details. You're welcome to implement it, but know that it will require a different non-linear way of evaluating thesaturation threshold and a different way to unpack the pixel values.
             raise ValueError(f"Unsupported PixelFormat: {self.PixelFormat}. Implement ExposureCalibrationConfig.saturation_threshold for this PixelFormat.")
@@ -113,7 +114,8 @@ def calibrate_exposure_interactive(
 
     fig, ax = plt.subplots()
     fig.canvas.manager.set_window_title("FLIR exposure calibration")
-
+    # unbind default key press handler to avoid closing the window on key press
+    fig.canvas.mpl_disconnect(fig.canvas.manager.key_press_handler_id)
     image_artist = None
 
     def on_key(event):
@@ -192,10 +194,10 @@ def calibrate_exposure_interactive(
 
             title = (
                 f"Pixel format: {config.PixelFormat} | "
-                f"Exposure: {state['exposure_us']:.3f} us | "
-                f"max: {max_value} | "
-                f"sat pixels: {saturated_pixels} | "
-                f"auto: {state['auto_reduce']}"
+                f"Exposure: {state['exposure_us']:.3f} us \n"
+                f"max pixel value: {max_value} | "
+                f"sat pixel count: {saturated_pixels} |"
+                f"sat pixel threshold: {config.SaturationThreshold:.1f}"
             )
 
             if image_artist is None:
@@ -215,7 +217,11 @@ def calibrate_exposure_interactive(
 
         image_artist.set_data(arr)
         ax.set_title(title) 
+        fig.canvas.draw_idle() 
+        fig.canvas.flush_events()
+        fig.savefig(output_json_path.with_suffix('.png'), dpi=140, bbox_inches='tight')
         print(f"Saved: {output_json_path.with_suffix('.png')}")
+
         plt.close(fig)
 
         np.save(output_json_path.with_suffix('.npy'), arr)
