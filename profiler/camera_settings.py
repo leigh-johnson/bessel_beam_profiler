@@ -12,8 +12,7 @@ AutoMode = Literal["Off", "Once", "Continuous"]
 ExposureModeName = Literal["Timed", "TriggerWidth"]
 PixelFormatName = Literal[
     "Mono8",
-    "Mono10p",
-    "Mono12p",
+    "Mono10Packed",
     "Mono12Packed",
     "Mono16",
 ]
@@ -21,7 +20,7 @@ PixelFormatName = Literal[
 
 AUTO_MODES = {"Off", "Once", "Continuous"}
 EXPOSURE_MODES = {"Timed", "TriggerWidth"}
-PIXEL_FORMATS = {"Mono8", "Mono10p", "Mono12p", "Mono12Packed", "Mono16"}
+PIXEL_FORMATS = {"Mono8", "Mono10", "Mono12", "Mono12Packed", "Mono16"}
 STREAM_BUFFER_HANDLING_MODES = {"NewestFirst", "OldestFirst", "OldestFirstOverwrite", "NewestOnly"}
 ACQUISITION_MODES = {"SingleFrame", "MultiFrame", "Continuous"}
 
@@ -41,7 +40,7 @@ class FLIRCameraSettings:
             ```
             settings = FLIRCameraSettings(
                     CameraModel="BFS-PGE-31S4M",
-                    PixelFormat="Mono16",
+                    PixelFormat="Mono8",
                     ExposureAuto="Off",
                     ExposureMode="Timed",
                     ExposureTime=500.0,   # microseconds
@@ -81,7 +80,7 @@ class FLIRCameraSettings:
     # Continuous mode, then captures exactly one frame per TriggerSoftware.Execute().
     AcquisitionMode: str = "Continuous"
     AcquisitionFrameRateEnable: bool = True
-    AcquisitionFrameRate: float = 3.0 # frames per second
+    AcquisitionFrameRate: float = 10 # frames per second
     AcquisitionFrameRatePersistence: bool = True
 
     # Black level / DC offset
@@ -122,9 +121,11 @@ class FLIRCameraSettings:
     StreamBufferCountManual: Optional[int] = 10
     StreamBufferHandlingMode: Optional[str] = "NewestOnly"
     StreamBufferCountMode: Optional[str] = "Manual"
-    DeviceLinkThroughputLimit: Optional[int] = 10_000_000 # bits
+    DeviceLinkThroughputLimit: Optional[int] = 100_000_000 # bits
 
-    TriggerSource: str = "Software"
+    TriggerMode: Optional[str] = "Off"
+    TriggerSource: Optional[str] = None
+    
 
 
     def __post_init__(self) -> None:
@@ -399,7 +400,7 @@ class FLIRCameraSettings:
             )
 
         # set software trigger source
-        if self.TriggerSource is not None:
+        if self.TriggerSource is not None and self.TriggerMode == "On":
             # Trigger must be Off before changing TriggerSource.
             _set_enum(cam, "TriggerMode", "Off", strict, messages)
             _set_enum(cam, "TriggerSource", self.TriggerSource, strict, messages)

@@ -294,8 +294,6 @@ def make_fake_pyspin():
 
     # QuickSpin enum constants used by FLIRCameraSettings.apply(...)
     fake.PixelFormat_Mono8 = "PixelFormat_Mono8"
-    fake.PixelFormat_Mono10p = "PixelFormat_Mono10p"
-    fake.PixelFormat_Mono12p = "PixelFormat_Mono12p"
     fake.PixelFormat_Mono12Packed = "PixelFormat_Mono12Packed"
     fake.PixelFormat_Mono16 = "PixelFormat_Mono16"
 

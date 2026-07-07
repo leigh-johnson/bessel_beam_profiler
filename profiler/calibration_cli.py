@@ -58,7 +58,7 @@ def calibrate() -> None:
     "--pixel-format",
     default="Mono8",
     show_default=True,
-    type=click.Choice(["Mono8", "Mono16"]),
+    type=click.Choice(["Mono8"]),
     help="Pixel format used to choose the saturation threshold.",
 )
 @click.option(

@@ -30,8 +30,8 @@ class ExposureCalibrationConfig:
 
     AllowedSaturatedPixels: int = 0
 
-    ReductionFactor: float = 0.75
-    IncreaseFactor: float = 1.25
+    ReductionFactor: float = 0.95
+    IncreaseFactor: float = 1.05
 
     AcquisitionTimeout_ms: int = 10000
     DisplayPause_s: float = 0.001
@@ -44,8 +44,14 @@ class ExposureCalibrationConfig:
             return 1023
         elif self.PixelFormat == "Mono12":
             return 4095
+        elif self.PixelFormat == "Mono12Packed":
+             # TODO I'm not messing with Mono12Packed bit-packed image format for now, since it uses non-linear mapping. See the FLIR Spinnaker SDK documentation for details. You're welcome to implement it, but know that it will require a different non-linear way of evaluating thesaturation threshold and a different way to unpack the pixel values.
+            raise ValueError(f"Unsupported PixelFormat: {self.PixelFormat}. Implement ExposureCalibrationConfig.saturation_threshold for this PixelFormat.")
+        # https://www.flir.com/support-center/instruments2/clarification-of-the-flir-ax5-camera-pixel-formats2/
+        # Teledyne Mono16 always returns 1 for bits 14 and 15, so the maximum pixel value is 16383
         elif self.PixelFormat == "Mono16":
-            return 65535
+            # Mono16 requires additional re-scaling. 
+            ValueError(f"Unsupported PixelFormat: {self.PixelFormat}. Implement ExposureCalibrationConfig.saturation_threshold for this PixelFormat.")
         else:
             # TODO I'm not messing with Mono12Packed bit-packed image format for now, since it uses non-linear mapping. See the FLIR Spinnaker SDK documentation for details. You're welcome to implement it, but know that it will require a different non-linear way of evaluating thesaturation threshold and a different way to unpack the pixel values.
             raise ValueError(f"Unsupported PixelFormat: {self.PixelFormat}. Implement ExposureCalibrationConfig.saturation_threshold for this PixelFormat.")
@@ -71,7 +77,6 @@ def calibrate_exposure_interactive(
         a       auto-reduce exposure until saturation disappears
         +/=     increase exposure
         -/_     decrease exposure
-        s       save current settings to JSON
         q/esc   accept current settings and quit
 
     Assumes:
@@ -101,7 +106,6 @@ def calibrate_exposure_interactive(
     state = {
         "running": True,
         "auto_reduce": False,
-        "save_requested": False,
         "exposure_us": exposure_us,
         "last_max": 0,
         "last_saturated": 0,
@@ -131,8 +135,6 @@ def calibrate_exposure_interactive(
             new_exposure = state["exposure_us"] * config.ReductionFactor
             state["exposure_us"] = _set_exposure_us(flir_camera_controller.cam, new_exposure, config)
 
-        elif key == "s":
-            state["save_requested"] = True
 
     fig.canvas.mpl_connect("key_press_event", on_key)
 
@@ -141,16 +143,14 @@ def calibrate_exposure_interactive(
         "  a       auto-reduce exposure until unsaturated\n"
         "  +/=     increase exposure\n"
         "  -/_     decrease exposure\n"
-        "  s       save current settings JSON\n"
         "  q/esc   accept and quit\n"
     )
     print("Beginning acquisition")
     flir_camera_controller._begin_acquisition()
     print(f"Starting exposure calibration with initial exposure = {state['exposure_us']:.3f} us")
-
+    arr = None
     try:
         while state["running"]:
-            flir_camera_controller._execute_software_trigger()
             timeout_ms = int(config.AcquisitionTimeout_ms + (state["exposure_us"] / 1000))
             image_result = flir_camera_controller.cam.GetNextImage(timeout_ms)
 
@@ -191,6 +191,7 @@ def calibrate_exposure_interactive(
                 )
 
             title = (
+                f"Pixel format: {config.PixelFormat} | "
                 f"Exposure: {state['exposure_us']:.3f} us | "
                 f"max: {max_value} | "
                 f"sat pixels: {saturated_pixels} | "
@@ -200,7 +201,7 @@ def calibrate_exposure_interactive(
             if image_artist is None:
                 image_artist = ax.imshow(
                     arr,
-                    cmap="gray",
+                    cmap='inferno',
                     vmin=0,
                     vmax=config.SaturationThreshold,
                 )
@@ -211,30 +212,17 @@ def calibrate_exposure_interactive(
 
             fig.canvas.draw_idle()
             plt.pause(config.DisplayPause_s)
-            flir_camera_controller._execute_software_trigger()
-            if state["save_requested"]:
-                current_settings = replace(
-                    settings,
-                    ExposureTime=state["exposure_us"],
-                )
 
-                current_settings.to_json_file(output_json_path)
-                print(f"Saved: {output_json_path}")
+        image_artist.set_data(arr)
+        ax.set_title(title) 
+        print(f"Saved: {output_json_path.with_suffix('.png')}")
+        plt.close(fig)
 
-                plt.savefig(output_json_path.with_suffix(".png"))
-                print(f"Saved: {output_json_path.with_suffix('.png')}")
-                state["save_requested"] = False
-            
-                plt.savefig(output_json_path.with_suffix(".png"))
-                print(f"Saved: {output_json_path.with_suffix('.png')}")
-
+        np.save(output_json_path.with_suffix('.npy'), arr)
+        print(f"Saved: {output_json_path.with_suffix('.npy')}")
     finally:
-        try:
-            flir_camera_controller._end_acquisition()
-        finally:
-            plt.savefig(output_json_path.with_suffix(".png"))
-            print(f"Saved: {output_json_path.with_suffix('.png')}")
-            plt.close(fig)
+        flir_camera_controller._end_acquisition()
+
 
     final_settings = replace(
         settings,
