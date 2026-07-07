@@ -73,6 +73,12 @@ def calibrate() -> None:
     show_default=True,
     type=click.IntRange(min=1),
 )
+@click.option(
+    "--saturation-threshold-percent",
+    default=0.70,
+    show_default=True,
+    type=click.FloatRange(min=0.0, max=1.0),
+)
 def exposure(
     camera_settings_path: Path,
     output_json_path: Path,
@@ -83,6 +89,7 @@ def exposure(
     pixel_format: str,
     allowed_saturated_pixels: int,
     acquisition_timeout_ms: int,
+    saturation_threshold_percent: float,    
 ) -> None:
     """
     Launch the interactive exposure calibration GUI.
@@ -107,6 +114,7 @@ def exposure(
         PixelFormat=pixel_format,
         AllowedSaturatedPixels=allowed_saturated_pixels,
         AcquisitionTimeout_ms=acquisition_timeout_ms,
+        SaturationThresholdPercent=saturation_threshold_percent,
     )
 
     print(f"Starting exposure calibration with config: {config}")

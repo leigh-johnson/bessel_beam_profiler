@@ -29,6 +29,7 @@ class ExposureCalibrationConfig:
     PixelFormat: PixelFormatName = "Mono8"
 
     AllowedSaturatedPixels: int = 0
+    SaturationThresholdPercent: float = 0.70
 
     ReductionFactor: float = 0.95
     IncreaseFactor: float = 1.05
@@ -39,11 +40,11 @@ class ExposureCalibrationConfig:
     @property
     def SaturationThreshold(self) -> int:
         if self.PixelFormat == "Mono8":
-            return 255
+            return 255 * self.SaturationThresholdPercent
         elif self.PixelFormat == "Mono10":
-            return 1023
+            return 1023 * self.SaturationThresholdPercent
         elif self.PixelFormat == "Mono12":
-            return 4095
+            return 4095 * self.SaturationThresholdPercent
         elif self.PixelFormat == "Mono12Packed":
              # TODO I'm not messing with Mono12Packed bit-packed image format for now, since it uses non-linear mapping. See the FLIR Spinnaker SDK documentation for details. You're welcome to implement it, but know that it will require a different non-linear way of evaluating thesaturation threshold and a different way to unpack the pixel values.
             raise ValueError(f"Unsupported PixelFormat: {self.PixelFormat}. Implement ExposureCalibrationConfig.saturation_threshold for this PixelFormat.")
