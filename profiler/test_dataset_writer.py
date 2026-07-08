@@ -233,6 +233,7 @@ def test_prepare_run_writes_settings_and_metadata(dataset_writer_module, tmp_pat
     )
 
     writer = dataset_writer_module.FLIRDatasetWriter(
+        camera_index=0,
         cam=cam,
         camera_settings=settings,
         config=config,
@@ -265,6 +266,7 @@ def test_acquire_scan_writes_npy_manifest_and_coordinate_record(
     stage = FastStageController()
 
     writer = dataset_writer_module.FLIRDatasetWriter(
+        camera_index=0,
         cam=cam,
         camera_settings=settings,
         config=dataset_writer_module.DatasetWriterConfig(
@@ -346,6 +348,7 @@ def test_acquire_static_writes_multiple_frames_without_stage_motion(
     stage = FastStageController()
 
     writer = dataset_writer_module.FLIRDatasetWriter(
+        camera_index=0,
         cam=cam,
         camera_settings=settings,
         config=dataset_writer_module.DatasetWriterConfig(
@@ -412,6 +415,7 @@ def test_acquire_one_frame_refuses_before_movement_complete(
     cam = FakeCamera(images=[FakeImage(np.zeros((2, 2), dtype=np.uint16))])
 
     writer = dataset_writer_module.FLIRDatasetWriter(
+        camera_index=0,
         cam=cam,
         camera_settings=FakeCameraSettings(),
         config=dataset_writer_module.DatasetWriterConfig(DatasetRoot=tmp_path),
@@ -438,6 +442,7 @@ def test_incomplete_image_releases_and_ends_acquisition(
     cam = FakeCamera(images=[image])
 
     writer = dataset_writer_module.FLIRDatasetWriter(
+        camera_index=0,
         cam=cam,
         camera_settings=FakeCameraSettings(),
         config=dataset_writer_module.DatasetWriterConfig(DatasetRoot=tmp_path),

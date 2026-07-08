@@ -183,3 +183,4 @@ six==1.17.0
 spinnaker-python @ file:///Users/leigh/edu/Kolkowitz-Sr/Pi2Su26/bessel_beam_simulator/.tmp/spinnaker_python-4.3.0.189-cp310-cp310-macosx_13_0_arm64/spinnaker_python-4.3.0.189-cp310-cp310-macosx_13_0_arm64.whl#sha256=f6e7a55b33fd46f88ee7035bad6ef172d283f4b33af97157293486fdd8501897
 tomli==2.4.1
 typing_extensions==4.16.0
+git
