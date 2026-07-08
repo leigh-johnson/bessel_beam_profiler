@@ -7,188 +7,10 @@ import numpy as np
 import pytest
 
 
+from conftest import FakeCamera, FakeImage, make_fake_pyspin
+
+
 MODULE_NAME = "calibration"
-
-
-class FakeNode:
-    def __init__(
-        self,
-        value=None,
-        *,
-        minimum=float("-inf"),
-        maximum=float("inf"),
-        available=True,
-        readable=True,
-        writable=True,
-    ):
-        self.value = value
-        self.minimum = minimum
-        self.maximum = maximum
-        self.available = available
-        self.readable = readable
-        self.writable = writable
-        self.set_calls = []
-
-    def SetValue(self, value):
-        self.value = value
-        self.set_calls.append(value)
-
-    def GetValue(self):
-        return self.value
-
-    def GetMin(self):
-        return self.minimum
-
-    def GetMax(self):
-        return self.maximum
-
-
-class FakeEnumEntry:
-    def __init__(self, name, value=1, readable=True):
-        self.name = name
-        self.value = value
-        self.readable = readable
-        self.available = True
-
-    def GetValue(self):
-        return self.value
-
-    def GetSymbolic(self):
-        return self.name
-
-
-class FakeEnumNode:
-    def __init__(self, readable=True, writable=True):
-        self.readable = readable
-        self.writable = writable
-        self.available = True
-        self.entries_requested = []
-        self.set_values = []
-
-    def GetEntryByName(self, name):
-        self.entries_requested.append(name)
-        return FakeEnumEntry(name, value=len(self.entries_requested))
-
-    def SetValue(self, value):
-        self.set_values.append(value)
-
-    def SetIntValue(self, value):
-        self.set_values.append(value)
-
-    def GetCurrentEntry(self):
-        return FakeEnumEntry("Current")
-
-
-class FakeNodeMap:
-    def __init__(self, nodes):
-        self.nodes = nodes
-
-    def GetNode(self, name):
-        return self.nodes.get(name)
-
-
-class FakeImage:
-    def __init__(self, arr, incomplete=False, status=0):
-        self.arr = np.array(arr, copy=True)
-        self.incomplete = incomplete
-        self.status = status
-        self.released = False
-
-    def IsIncomplete(self):
-        return self.incomplete
-
-    def GetImageStatus(self):
-        return self.status
-
-    def GetNDArray(self):
-        return self.arr
-
-    def Release(self):
-        self.released = True
-
-
-class FakeCamera:
-    def __init__(self, images):
-        self.images = list(images)
-        self.events = []
-
-        # QuickSpin-style nodes used by real FLIRCameraSettings.apply(...)
-        self.PixelFormat = FakeNode()
-        self.ExposureAuto = FakeNode()
-        self.ExposureMode = FakeNode()
-        self.ExposureTime = FakeNode(minimum=25.0, maximum=1_000_000.0)
-
-        self.AcquisitionFrameRatePersistence = FakeNode(True)
-        self.AcquisitionMode = FakeEnumNode()
-        self.AcquisitionFrameRateEnable = FakeNode(True)
-        self.AcquisitionFrameRate = FakeNode(1.0, minimum=0.0, maximum=1_000_000.0)
-
-        self.GainAuto = FakeNode()
-        self.Gain = FakeNode(minimum=0.0, maximum=48.0)
-
-        self.GammaEnable = FakeNode()
-        self.Gamma = FakeNode(minimum=0.25, maximum=4.0)
-
-        self.BlackLevelClampingEnable = FakeNode(False)
-
-        self.BlackLevelSelector = FakeNode()
-        self.BlackLevel = FakeNode(minimum=0.0, maximum=100.0)
-
-        self.BalanceWhiteAuto = FakeNode()
-        self.BalanceRatioSelector = FakeNode()
-        self.BalanceRatio = FakeNode(minimum=0.0, maximum=10.0)
-        self.GevSCPSPacketSize = FakeNode(1500, minimum=0, maximum=10_000_000)
-        self.DeviceLinkThroughputLimit = FakeNode(
-            10_000_000,
-            minimum=0,
-            maximum=100_000_000,
-        )
-        self.TriggerMode = FakeEnumNode()
-        self.TriggerSource = FakeEnumNode()
-
-        self.AcquisitionMode = FakeEnumNode()
-        self.stream_buffer_mode = FakeEnumNode()
-        self.stream_buffer_count_mode = FakeEnumNode()
-        self.stream_buffer_count_manual = FakeNode(10, minimum=1, maximum=10_000)
-
-        self.node_map = FakeNodeMap(
-            {
-                "AcquisitionMode": self.AcquisitionMode,
-            }
-        )
-        self.stream_node_map = FakeNodeMap(
-            {
-                "StreamBufferHandlingMode": self.stream_buffer_mode,
-                "StreamBufferCountMode": self.stream_buffer_count_mode,
-                "StreamBufferCountManual": self.stream_buffer_count_manual,
-            }
-        )
-        self.tl_device_node_map = FakeNodeMap(
-            {
-                "DeviceModelName": FakeNode("BFS-PGE-31S4M"),
-            }
-        )
-
-    def GetNodeMap(self):
-        return self.node_map
-
-    def GetTLStreamNodeMap(self):
-        return self.stream_node_map
-
-    def GetTLDeviceNodeMap(self):
-        return self.tl_device_node_map
-
-    def BeginAcquisition(self):
-        self.events.append("begin")
-
-    def GetNextImage(self, timeout_ms):
-        self.events.append(f"get:{timeout_ms}")
-        if not self.images:
-            raise RuntimeError("No fake images left")
-        return self.images.pop(0)
-
-    def EndAcquisition(self):
-        self.events.append("end")
 
 
 class FakeCameraController:
@@ -231,97 +53,33 @@ class FakeAxis:
 class FakeCanvas:
     def __init__(self):
         self.callbacks = {}
-        self.manager = types.SimpleNamespace(set_window_title=lambda title: None)
+        self.manager = types.SimpleNamespace(
+            set_window_title=lambda title: None,
+            key_press_handler_id=1,
+        )
+        self.disconnected = []
 
     def mpl_connect(self, event_name, callback):
         self.callbacks[event_name] = callback
         return 1
 
+    def mpl_disconnect(self, cid):
+        self.disconnected.append(cid)
+
     def draw_idle(self):
+        pass
+
+    def flush_events(self):
         pass
 
 
 class FakeFigure:
     def __init__(self):
         self.canvas = FakeCanvas()
+        self.savefig_calls = []
 
-
-def make_fake_pyspin():
-    fake = types.SimpleNamespace()
-
-    class SpinnakerException(Exception):
-        pass
-
-    class FakeCameraList:
-        def __init__(self, cameras=None):
-            self.cameras = list(cameras or [])
-
-        def GetSize(self):
-            return len(self.cameras)
-
-        def GetByIndex(self, index):
-            return self.cameras[index]
-
-        def Clear(self):
-            self.cameras.clear()
-
-    class FakeSystem:
-        def __init__(self, cameras=None):
-            self.cameras = FakeCameraList(cameras)
-
-        def GetCameras(self):
-            return self.cameras
-
-        def ReleaseInstance(self):
-            pass
-
-    fake.FakeCameraList = FakeCameraList
-    fake.FakeSystem = FakeSystem
-    fake.SpinnakerException = SpinnakerException
-    fake.Camera = object
-    fake.System = types.SimpleNamespace(GetInstance=lambda: FakeSystem())
-    fake.CameraList = object
-
-    fake.IsAvailable = lambda node: node is not None and getattr(node, "available", True)
-    fake.IsReadable = lambda node: node is not None and getattr(node, "readable", True)
-    fake.IsWritable = lambda node: node is not None and getattr(node, "writable", True)
-
-    fake.CEnumerationPtr = lambda node: node
-    fake.CStringPtr = lambda node: node
-    fake.CFloatPtr = lambda node: node
-    fake.CBooleanPtr = lambda node: node
-    fake.CIntegerPtr = lambda node: node
-
-    # QuickSpin enum constants used by FLIRCameraSettings.apply(...)
-    fake.PixelFormat_Mono8 = "PixelFormat_Mono8"
-    fake.PixelFormat_Mono12Packed = "PixelFormat_Mono12Packed"
-    fake.PixelFormat_Mono16 = "PixelFormat_Mono16"
-
-    fake.ExposureAuto_Off = "ExposureAuto_Off"
-    fake.ExposureAuto_Once = "ExposureAuto_Once"
-    fake.ExposureAuto_Continuous = "ExposureAuto_Continuous"
-
-    fake.ExposureMode_Timed = "ExposureMode_Timed"
-    fake.ExposureMode_TriggerWidth = "ExposureMode_TriggerWidth"
-
-    fake.GainAuto_Off = "GainAuto_Off"
-    fake.GainAuto_Once = "GainAuto_Once"
-    fake.GainAuto_Continuous = "GainAuto_Continuous"
-
-    fake.BlackLevelSelector_All = "BlackLevelSelector_All"
-
-    fake.BalanceWhiteAuto_Off = "BalanceWhiteAuto_Off"
-    fake.BalanceWhiteAuto_Once = "BalanceWhiteAuto_Once"
-    fake.BalanceWhiteAuto_Continuous = "BalanceWhiteAuto_Continuous"
-
-    fake.BalanceRatioSelector_Blue = "BalanceRatioSelector_Blue"
-    fake.BalanceRatioSelector_Red = "BalanceRatioSelector_Red"
-
-    fake.TriggerMode_Off = "TriggerMode_Off"
-    fake.TriggerMode_On = "TriggerMode_On"
-    fake.TriggerSource_Software = "TriggerSource_Software"
-
-    return fake
+    def savefig(self, path, **kwargs):
+        self.savefig_calls.append(path)
 
 
 def make_fake_matplotlib():
@@ -353,11 +111,6 @@ def modules(monkeypatch):
     """
     Use real camera_settings.FLIRCameraSettings, but fake PySpin before import.
     """
-    monkeypatch.setitem(sys.modules, "PySpin", make_fake_pyspin())
-
-    sys.modules.pop("camera_settings", None)
-    sys.modules.pop(MODULE_NAME, None)
-
     camera_settings = importlib.import_module("camera_settings")
     calibration = importlib.import_module(MODULE_NAME)
     monkeypatch.setattr(calibration, "FLIRCameraControllerBase", FakeCameraController)
@@ -473,12 +226,14 @@ def test_calibration_uses_real_flir_camera_settings_and_writes_json(
 
     assert cam.AcquisitionMode.entries_requested == ["Continuous"]
     assert cam.stream_buffer_mode.entries_requested == ["NewestOnly"]
-    assert cam.events == ["begin", "get:123", "end"]
+    # Timeout is AcquisitionTimeout_ms plus the exposure time in ms: 123 + 1.
+    assert cam.events == ["begin", "get:124", "end"]
 
 
 def test_auto_reduce_updates_real_flir_camera_settings_result(
     modules,
     monkeypatch,
+    tmp_path,
 ):
     calibration, camera_settings = modules
 
@@ -502,6 +257,7 @@ def test_auto_reduce_updates_real_flir_camera_settings_result(
     result = calibration.calibrate_exposure_interactive(
         cam,
         make_base_settings(camera_settings, exposure_us=1000.0),
+        output_json_path=tmp_path / "camera_settings.json",
         config=calibration.ExposureCalibrationConfig(
             ReductionFactor=0.5,
             AcquisitionTimeout_ms=50,
@@ -519,12 +275,15 @@ def test_auto_reduce_updates_real_flir_camera_settings_result(
     assert cam.ExposureTime.set_calls == [1000.0, 500.0]
 
     assert all(img.released for img in images)
-    assert cam.events == ["begin", "get:50", "get:50", "get:50", "end"]
+    # Timeout is AcquisitionTimeout_ms plus the exposure time in ms:
+    # 50 + 1 at 1000 us, then 50 + 0.5 (truncated) after the reduction to 500 us.
+    assert cam.events == ["begin", "get:51", "get:51", "get:50", "end"]
 
 
 def test_plus_and_minus_keys_update_real_settings_result(
     modules,
     monkeypatch,
+    tmp_path,
 ):
     calibration, camera_settings = modules
 
@@ -549,6 +308,7 @@ def test_plus_and_minus_keys_update_real_settings_result(
     result = calibration.calibrate_exposure_interactive(
         cam,
         make_base_settings(camera_settings, exposure_us=1000.0),
+        output_json_path=tmp_path / "camera_settings.json",
         config=calibration.ExposureCalibrationConfig(
             IncreaseFactor=2.0,
             ReductionFactor=0.25,
@@ -567,20 +327,27 @@ def test_plus_and_minus_keys_update_real_settings_result(
 def test_exposure_calibration_config_saturation_threshold():
     from calibration import ExposureCalibrationConfig
 
-    config = ExposureCalibrationConfig(PixelFormat="Mono8")
+    # Threshold is SaturationThresholdPercent of the pixel format's full scale.
+    config = ExposureCalibrationConfig(PixelFormat="Mono8", SaturationThresholdPercent=1.0)
     assert config.SaturationThreshold == 255
 
-    config = ExposureCalibrationConfig(PixelFormat="Mono10")
+    config = ExposureCalibrationConfig(PixelFormat="Mono10", SaturationThresholdPercent=1.0)
     assert config.SaturationThreshold == 1023
 
-    config = ExposureCalibrationConfig(PixelFormat="Mono12")
+    config = ExposureCalibrationConfig(PixelFormat="Mono12", SaturationThresholdPercent=1.0)
     assert config.SaturationThreshold == 4095
 
-    config = ExposureCalibrationConfig(PixelFormat="Mono16")
-    assert config.SaturationThreshold == 65535
+    # Default percent is 0.70.
+    config = ExposureCalibrationConfig(PixelFormat="Mono8")
+    assert config.SaturationThreshold == 178
 
     with pytest.raises(ValueError):
         config = ExposureCalibrationConfig(PixelFormat="Mono12Packed")
+        _ = config.SaturationThreshold
+
+    # Mono16 needs re-scaling and is not implemented yet.
+    with pytest.raises(ValueError):
+        config = ExposureCalibrationConfig(PixelFormat="Mono16")
         _ = config.SaturationThreshold
 
 def test_image_is_overexposed(monkeypatch):
