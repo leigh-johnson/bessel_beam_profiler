@@ -6,156 +6,10 @@ import types
 import numpy as np
 import pytest
 
+from conftest import FakeCamera, FakeCameraSettings, FakeImage
+
 
 MODULE_NAME = "dataset_writer"
-
-
-class FakeEnumEntry:
-    def __init__(self, name, value=1, *, readable=True):
-        self.name = name
-        self.value = value
-        self.readable = readable
-
-    def GetValue(self):
-        return self.value
-
-    def GetSymbolic(self):
-        return self.name
-
-
-class FakeEnumNode:
-    def __init__(self, *, readable=True, writable=True):
-        self.readable = readable
-        self.writable = writable
-        self.available = True
-        self.current_value = None
-        self.requested_entries = []
-
-    def GetEntryByName(self, name):
-        self.requested_entries.append(name)
-        return FakeEnumEntry(name=name, value=len(self.requested_entries))
-
-    def SetIntValue(self, value):
-        self.current_value = value
-
-
-class FakeIntegerNode:
-    def __init__(self, value=0, minimum=1, maximum=128, *, readable=True, writable=True):
-        self.value = value
-        self.minimum = minimum
-        self.maximum = maximum
-        self.readable = readable
-        self.writable = writable
-
-    def GetMin(self):
-        return self.minimum
-
-    def GetMax(self):
-        return self.maximum
-
-    def GetValue(self):
-        return self.value
-
-    def SetValue(self, value):
-        self.value = value
-
-
-class FakeCommandNode:
-    readable = True
-    writable = True
-
-    def __init__(self):
-        self.execute_count = 0
-
-    def Execute(self):
-        self.execute_count += 1
-
-
-class FakeNodeMap:
-    def __init__(self, *, stream=False):
-        if stream:
-            self.nodes = {
-                "StreamBufferHandlingMode": FakeEnumNode(),
-                "StreamBufferCountMode": FakeEnumNode(),
-                "StreamBufferCountManual": FakeIntegerNode(),
-            }
-        else:
-            self.nodes = {
-                "AcquisitionMode": FakeEnumNode(),
-                "TriggerMode": FakeEnumNode(),
-                "TriggerSource": FakeEnumNode(),
-                "TriggerSoftware": FakeCommandNode(),
-            }
-
-    def GetNode(self, name):
-        return self.nodes.get(name)
-
-
-class FakeImage:
-    def __init__(self, array, *, incomplete=False, status=0, frame_id=1):
-        self.array = np.array(array, copy=True)
-        self.incomplete = incomplete
-        self.status = status
-        self.frame_id = frame_id
-        self.released = False
-
-    def IsIncomplete(self):
-        return self.incomplete
-
-    def GetImageStatus(self):
-        return self.status
-
-    def GetNDArray(self):
-        return self.array
-
-    def GetFrameID(self):
-        return self.frame_id
-
-    def Save(self, path):
-        self.saved_paths = getattr(self, "saved_paths", [])
-        self.saved_paths.append(path)
-
-    def Release(self):
-        self.released = True
-
-
-class FakeCamera:
-    def __init__(self, images):
-        self.images = list(images)
-        self.node_map = FakeNodeMap()
-        self.stream_node_map = FakeNodeMap(stream=True)
-        self.events = []
-
-    def GetNodeMap(self):
-        return self.node_map
-
-    def GetTLStreamNodeMap(self):
-        return self.stream_node_map
-
-    def BeginAcquisition(self):
-        self.events.append("begin")
-
-    def GetNextImage(self, timeout_ms):
-        self.events.append(f"get:{timeout_ms}")
-        if not self.images:
-            raise RuntimeError("No fake images left")
-        return self.images.pop(0)
-
-    def EndAcquisition(self):
-        self.events.append("end")
-
-
-class FakeCameraSettings:
-    def __init__(self):
-        self.apply_calls = []
-        self.saved_paths = []
-
-    def apply(self, cam, strict=True):
-        self.apply_calls.append((cam, strict))
-
-    def to_json_file(self, path):
-        self.saved_paths.append(path)
-        path.write_text(json.dumps({"CameraModel": "fake"}, indent=2) + "\n")
 
 
 class FastStageController:
@@ -180,31 +34,12 @@ class NeverCompletesStageController:
         pass
 
 
-def make_fake_pyspin():
-    fake = types.SimpleNamespace()
-
-    class SpinnakerException(Exception):
-        pass
-
-    fake.SpinnakerException = SpinnakerException
-    fake.Camera = object
-    fake.CEnumerationPtr = lambda node: node
-    fake.CIntegerPtr = lambda node: node
-    fake.CCommandPtr = lambda node: node
-    fake.IsReadable = lambda node: node is not None and getattr(node, "readable", True)
-    fake.IsWritable = lambda node: node is not None and getattr(node, "writable", True)
-    return fake
-
-
 @pytest.fixture()
-def dataset_writer_module(monkeypatch):
-    monkeypatch.setitem(sys.modules, "PySpin", make_fake_pyspin())
-
+def dataset_writer_module(monkeypatch, fake_pyspin):
     fake_camera_settings_module = types.ModuleType("camera_settings")
     fake_camera_settings_module.FLIRCameraSettings = object
     monkeypatch.setitem(sys.modules, "camera_settings", fake_camera_settings_module)
 
-    sys.modules.pop(MODULE_NAME, None)
     return importlib.import_module(MODULE_NAME)
 
 
@@ -323,15 +158,8 @@ def test_acquire_scan_writes_npy_manifest_and_coordinate_record(
     assert cam.node_map.GetNode("TriggerSoftware").execute_count == 1
     assert image.released is True
 
-    assert cam.node_map.GetNode("AcquisitionMode").requested_entries == ["Continuous"]
-    assert cam.node_map.GetNode("TriggerSource").requested_entries == ["Software"]
-    assert cam.stream_node_map.GetNode("StreamBufferHandlingMode").requested_entries == [
-        "NewestOnly"
-    ]
-    assert cam.stream_node_map.GetNode("StreamBufferCountMode").requested_entries == [
-        "Manual"
-    ]
-    assert cam.stream_node_map.GetNode("StreamBufferCountManual").value == 6
+    # Node configuration is delegated to FLIRCameraSettings.apply during prepare_run.
+    assert settings.apply_calls == [(cam, True)]
 
 
 def test_acquire_static_writes_multiple_frames_without_stage_motion(
@@ -403,8 +231,8 @@ def test_acquire_static_writes_multiple_frames_without_stage_motion(
     assert first_manifest_record["Extra"]["ScanKind"] == "Static"
     assert first_manifest_record["Extra"]["FrameID"] == 100
 
-    # TriggerMode is configured Off -> On, then reset to Off during cleanup.
-    assert cam.node_map.GetNode("TriggerMode").requested_entries == ["Off", "On", "Off"]
+    # Node configuration is delegated to FLIRCameraSettings.apply during prepare_run.
+    assert settings.apply_calls == [(cam, True)]
 
 
 def test_acquire_one_frame_refuses_before_movement_complete(
@@ -454,7 +282,7 @@ def test_incomplete_image_releases_and_ends_acquisition(
         dataset_writer_module.DatasetWriterError,
         match="Image incomplete; image status = 3",
     ):
-        writer._acquire_one_frame(make_point(coordinates_module), shot_idx=0)
+        writer._acquire_point_frames(make_point(coordinates_module))
 
     assert image.released is True
     assert cam.events == ["begin", "get:2000", "end"]

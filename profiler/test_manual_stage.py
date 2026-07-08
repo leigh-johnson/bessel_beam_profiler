@@ -6,8 +6,8 @@ import types
 import numpy as np
 import pytest
 
-# Reuse the fake PySpin / camera scaffolding from the dataset writer tests.
-from test_dataset_writer import (
+# Reuse the shared fake PySpin / camera scaffolding.
+from conftest import (
     FakeCamera,
     FakeCameraSettings,
     FakeImage,
