@@ -22,9 +22,15 @@ from camera_base import FLIRCameraControllerBase
 class DatasetWriterError(RuntimeError):
     pass
 
+class DatasetWriterJobType:
+    """Enum for the type of dataset writer job."""
+    AUTO_SCAN = "auto_scan"
+    MANUAL_SCAN = "manual_scan"
+    STATIC = "static"
 
 @dataclass(frozen=True)
 class DatasetWriterConfig:
+    JobType: str
     DatasetRoot: Path
     AcquisitionTimeout_ms: int = 2000
     StageTimeout_s: float = 30.0
@@ -34,12 +40,9 @@ class DatasetWriterConfig:
     # We can encode to BMP or PNG later, but want to avoid any lossy compression at this stage.
     ImageExtension: str = ".npy"
 
-    # Give each run a unique ID so that multiple runs on the same day don't collide.
-    RunUUID: str = field(default_factory=lambda: uuid.uuid4().hex)
-
     def make_run_dir(self) -> Path:
-        today = dt.date.today().isoformat()
-        return self.DatasetRoot / f"{today}-{self.RunUUID}"
+        now = dt.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+        return self.DatasetRoot / f"{self.JobType}-{now}"
 
 
 @dataclass
@@ -421,12 +424,39 @@ class FLIRDatasetWriter(FLIRCameraControllerBase):
         frame_path = self._frame_path(point, shot_idx)
         self._write_array(frame_path, np.asarray(arr))
 
+        self._write_img(np.asarray(arr), frame_path.with_suffix(".jpg"))
+
         record = self._build_frame_record(
             np.asarray(arr), frame_path, point, shot_idx, merged_extra
         )
         self._append_manifest(record)
 
         return record
+
+    def _write_img(self, arr: np.ndarray, path: Path) -> None:
+        """
+        Save a JPG copy of the array for quick viewing.
+
+        This is used by the manual translation-stage mode, where frames are
+        grabbed continuously for a live preview and the user chooses which
+        one to keep. The manifest record is identical in schema to frames
+        acquired by acquire_scan / acquire_static.
+        """
+
+        import cv2
+
+        if path.suffix != ".jpg":
+            raise ValueError("path must end with '.jpg'")
+
+        # Convert Mono16 to Mono8 for JPG saving.
+        if arr.dtype == np.uint16:
+            arr = (arr >> 8).astype(np.uint8)
+
+        # Convert Mono8 to BGR for JPG saving.
+        if arr.ndim == 2:
+            arr = cv2.cvtColor(arr, cv2.COLOR_GRAY2BGR)
+
+        cv2.imwrite(str(path), arr)
 
     def _build_frame_record(
         self,

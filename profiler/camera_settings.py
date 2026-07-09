@@ -125,7 +125,11 @@ class FLIRCameraSettings:
 
     TriggerMode: Optional[str] = "Off"
     TriggerSource: Optional[str] = None
-    
+
+    # Free-text description of the optical setup this calibration was made for,
+    # e.g. "after axicon#2, OD 1.0 filter". Not applied to the camera.
+    Notes: Optional[str] = None
+
 
 
     def __post_init__(self) -> None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import click
+from dataset_writer import DatasetWriterJobType
 
 def _parse_metadata(metadata_items: tuple[str, ...]) -> dict[str, str]:
     metadata: dict[str, str] = {}
@@ -158,6 +159,7 @@ def static(
         DatasetRoot=dataset_root,
         AcquisitionTimeout_ms=acquisition_timeout_ms,
         SettleTime_s=settle_time_s,
+        JobType=DatasetWriterJobType.STATIC,
     )
 
     run_metadata = _parse_metadata(metadata)
@@ -301,6 +303,7 @@ def manual(
     camera_settings = _load_camera_settings_for_software_trigger(camera_settings_path)
 
     config = DatasetWriterConfig(
+        JobType=DatasetWriterJobType.MANUAL_SCAN,
         DatasetRoot=dataset_root,
         AcquisitionTimeout_ms=acquisition_timeout_ms,
     )

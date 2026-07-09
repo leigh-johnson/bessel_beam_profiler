@@ -1,0 +1,1059 @@
+{
+  "OffsetsPx": [
+    {
+      "dy_px": 0.0,
+      "dx_px": 0.0
+    },
+    {
+      "dy_px": 11.24413441219672,
+      "dx_px": 107.78672047003442
+    },
+    {
+      "dy_px": 30.48590035595508,
+      "dx_px": 290.86822685189134
+    },
+    {
+      "dy_px": 61.219772358684324,
+      "dx_px": 570.0076102177748
+    },
+    {
+      "dy_px": 109.85047092570431,
+      "dx_px": 1020.5686829256381
+    },
+    {
+      "dy_px": 126.87692417913891,
+      "dx_px": 1169.49377975559
+    },
+    {
+      "dy_px": 139.83837141526735,
+      "dx_px": 1284.7647648520237
+    },
+    {
+      "dy_px": 153.70351635368857,
+      "dx_px": 1419.6350368395972
+    },
+    {
+      "dy_px": 167.95648559488856,
+      "dx_px": 1551.5391723606213
+    },
+    {
+      "dy_px": 181.75198610104985,
+      "dx_px": 1677.6921451748678
+    },
+    {
+      "dy_px": 191.63882163740507,
+      "dx_px": 1766.6988166166839
+    },
+    {
+      "dy_px": 203.62906799725988,
+      "dx_px": 1872.6978741985672
+    },
+    {
+      "dy_px": 525.4913083397827,
+      "dx_px": 2003.4291628786975
+    },
+    {
+      "dy_px": 539.5966703603306,
+      "dx_px": 2135.4278663998402
+    },
+    {
+      "dy_px": 511.29755438595225,
+      "dx_px": 1878.7918870155822
+    },
+    {
+      "dy_px": 493.3439912579222,
+      "dx_px": 1712.0641465241736
+    },
+    {
+      "dy_px": 477.39613684919186,
+      "dx_px": 1568.18418280541
+    },
+    {
+      "dy_px": 455.1466694027604,
+      "dx_px": 1361.2843115982496
+    },
+    {
+      "dy_px": 434.87125705152334,
+      "dx_px": 1175.5079071320756
+    },
+    {
+      "dy_px": 412.79486526356936,
+      "dx_px": 970.3411965096786
+    },
+    {
+      "dy_px": 389.648600789445,
+      "dx_px": 753.5811742377696
+    },
+    {
+      "dy_px": 367.4582056268887,
+      "dx_px": 550.4014366435529
+    },
+    {
+      "dy_px": 343.13065018555585,
+      "dx_px": 325.2563557317153
+    },
+    {
+      "dy_px": 317.8608987086168,
+      "dx_px": 99.31328977802286
+    },
+    {
+      "dy_px": 296.8125308381859,
+      "dx_px": -97.38286647040331
+    },
+    {
+      "dy_px": 844.7023979785215,
+      "dx_px": -157.4716092192898
+    },
+    {
+      "dy_px": 874.3483791458616,
+      "dx_px": 121.30995842390843
+    },
+    {
+      "dy_px": 895.7889950616945,
+      "dx_px": 327.31705532247975
+    },
+    {
+      "dy_px": 903.4802683971467,
+      "dx_px": 390.26927956688627
+    },
+    {
+      "dy_px": 929.4981804149743,
+      "dx_px": 626.4082624133544
+    },
+    {
+      "dy_px": 966.1634017199075,
+      "dx_px": 961.4945766020472
+    },
+    {
+      "dy_px": 978.2367601666981,
+      "dx_px": 1072.5594583641887
+    },
+    {
+      "dy_px": 1009.3032387892904,
+      "dx_px": 1363.3832579162731
+    },
+    {
+      "dy_px": 1031.2673153914977,
+      "dx_px": 1565.273855413789
+    },
+    {
+      "dy_px": 1060.9218058891033,
+      "dx_px": 1839.3695759218683
+    },
+    {
+      "dy_px": 1081.090157235901,
+      "dx_px": 2023.4087564698564
+    },
+    {
+      "dy_px": 1094.8042550373389,
+      "dx_px": 2150.6827655361644
+    },
+    {
+      "dy_px": 1617.6650307396985,
+      "dx_px": 2093.651902071172
+    },
+    {
+      "dy_px": 1598.728940727756,
+      "dx_px": 1927.5489079026615
+    },
+    {
+      "dy_px": 1588.7395412777648,
+      "dx_px": 1834.7728257125636
+    },
+    {
+      "dy_px": 1563.6760446059054,
+      "dx_px": 1598.030655255387
+    },
+    {
+      "dy_px": 1544.5854614683026,
+      "dx_px": 1423.6993852367566
+    },
+    {
+      "dy_px": 1522.799190579541,
+      "dx_px": 1225.9455080802181
+    },
+    {
+      "dy_px": 1500.6677005031192,
+      "dx_px": 1022.4932347227698
+    },
+    {
+      "dy_px": 1475.6152872713246,
+      "dx_px": 792.5477776479058
+    },
+    {
+      "dy_px": 1449.6191297812925,
+      "dx_px": 554.4154478624184
+    },
+    {
+      "dy_px": 1426.3883154040664,
+      "dx_px": 342.7129763608666
+    },
+    {
+      "dy_px": 1405.4514892437714,
+      "dx_px": 150.94411494760448
+    },
+    {
+      "dy_px": 1382.4324191153235,
+      "dx_px": -56.39818183236707
+    },
+    {
+      "dy_px": 1371.1333294409865,
+      "dx_px": -164.35891260702988
+    },
+    {
+      "dy_px": 1352.1602252389482,
+      "dx_px": -339.84581262832444
+    },
+    {
+      "dy_px": 1646.2149761550627,
+      "dx_px": -372.02183830239437
+    },
+    {
+      "dy_px": 1671.385618098153,
+      "dx_px": -133.84136444685495
+    },
+    {
+      "dy_px": 1686.1111203406772,
+      "dx_px": -5.774557145390787
+    },
+    {
+      "dy_px": 1703.3479808334855,
+      "dx_px": 154.39619091590194
+    },
+    {
+      "dy_px": 1731.8931890900901,
+      "dx_px": 417.6171703495112
+    },
+    {
+      "dy_px": 1753.698392129066,
+      "dx_px": 618.5651033679106
+    },
+    {
+      "dy_px": 1769.9672437161053,
+      "dx_px": 767.7847001766601
+    },
+    {
+      "dy_px": 1769.9752122084321,
+      "dx_px": 767.8071674001021
+    },
+    {
+      "dy_px": 1783.209752165638,
+      "dx_px": 892.8400116818193
+    },
+    {
+      "dy_px": 1791.346404992445,
+      "dx_px": 969.7822532165347
+    },
+    {
+      "dy_px": 1798.288549245498,
+      "dx_px": 1033.1200412514308
+    },
+    {
+      "dy_px": 1807.3554483850062,
+      "dx_px": 1113.2984838441469
+    },
+    {
+      "dy_px": 1816.4533958659656,
+      "dx_px": 1198.8914366922904
+    },
+    {
+      "dy_px": 1826.454154822088,
+      "dx_px": 1287.3212719838934
+    },
+    {
+      "dy_px": 1837.3224233597587,
+      "dx_px": 1390.450892893238
+    },
+    {
+      "dy_px": 1846.2792718621429,
+      "dx_px": 1470.5164010114518
+    },
+    {
+      "dy_px": 1854.2255445312255,
+      "dx_px": 1544.3981569681052
+    },
+    {
+      "dy_px": 1864.296562298689,
+      "dx_px": 1630.6215609857736
+    },
+    {
+      "dy_px": 1871.4420361348914,
+      "dx_px": 1698.7293242369965
+    },
+    {
+      "dy_px": 1894.6477902772285,
+      "dx_px": 1905.9975976826427
+    },
+    {
+      "dy_px": 1911.0294292132032,
+      "dx_px": 2054.256065629316
+    },
+    {
+      "dy_px": 1918.3022822211092,
+      "dx_px": 2124.1960025518447
+    },
+    {
+      "dy_px": 1924.4312428683452,
+      "dx_px": 2184.1620488727035
+    },
+    {
+      "dy_px": 1924.5362002245497,
+      "dx_px": 2184.1580752169248
+    },
+    {
+      "dy_px": 2537.476487981433,
+      "dx_px": 986.1412802795289
+    },
+    {
+      "dy_px": 2537.47546284987,
+      "dx_px": 986.1362607129435
+    },
+    {
+      "dy_px": 2512.397063191667,
+      "dx_px": 1013.7842404492716
+    },
+    {
+      "dy_px": 2488.122770773727,
+      "dx_px": 1352.0977588122162
+    },
+    {
+      "dy_px": 2466.7762966787704,
+      "dx_px": 1648.354818409082
+    },
+    {
+      "dy_px": 2442.1517076067557,
+      "dx_px": 1977.650026636007
+    },
+    {
+      "dy_px": 2424.9282089994044,
+      "dx_px": 2211.102603626541
+    },
+    {
+      "dy_px": 2405.925259702464,
+      "dx_px": 2471.3456426569774
+    },
+    {
+      "dy_px": 2376.7169152990355,
+      "dx_px": 2882.618959105239
+    },
+    {
+      "dy_px": 2366.0677238679336,
+      "dx_px": 3025.576357925909
+    },
+    {
+      "dy_px": 2356.1661023002853,
+      "dx_px": 3161.3971726444984
+    },
+    {
+      "dy_px": 2355.0148969165075,
+      "dx_px": 3160.3558805249336
+    }
+  ],
+  "PairwiseShifts": [
+    {
+      "dy_px": 11.24413441219672,
+      "dx_px": 107.78672047003442,
+      "Confidence": 0.09891683727549667,
+      "OverlapNCC": 0.9958303564248786,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 19.24176594375836,
+      "dx_px": 183.08150638185688,
+      "Confidence": 0.08172558653748013,
+      "OverlapNCC": 0.9938353171845927,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 30.733872002729246,
+      "dx_px": 279.1393833658835,
+      "Confidence": 0.07103006191892927,
+      "OverlapNCC": 0.9948154146509699,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 48.630698567019984,
+      "dx_px": 450.5610727078634,
+      "Confidence": 0.04740637564868576,
+      "OverlapNCC": 0.9948730037788782,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 17.026453253434603,
+      "dx_px": 148.92509682995188,
+      "Confidence": 0.15596617050301761,
+      "OverlapNCC": 0.9945885640995192,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 12.961447236128427,
+      "dx_px": 115.27098509643395,
+      "Confidence": 0.14067919206789548,
+      "OverlapNCC": 0.9953769922429451,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 13.865144938421224,
+      "dx_px": 134.87027198757337,
+      "Confidence": 0.1314721806446996,
+      "OverlapNCC": 0.9950119989908693,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 14.252969241199985,
+      "dx_px": 131.90413552102405,
+      "Confidence": 0.11994346344626669,
+      "OverlapNCC": 0.9949877948760564,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 13.795500506161304,
+      "dx_px": 126.15297281424651,
+      "Confidence": 0.11550232422873177,
+      "OverlapNCC": 0.9950536663838899,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 9.886835536355218,
+      "dx_px": 89.00667144181608,
+      "Confidence": 0.13133807148467996,
+      "OverlapNCC": 0.9949510738537427,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 11.990246359854813,
+      "dx_px": 105.99905758188328,
+      "Confidence": 0.1280503929894821,
+      "OverlapNCC": 0.993062185114376,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 321.8622403425228,
+      "dx_px": 130.73128868013035,
+      "Confidence": 0.08471284125406842,
+      "OverlapNCC": 0.9924241459415455,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 14.10536202054794,
+      "dx_px": 131.9987035211427,
+      "Confidence": 0.12991740308709968,
+      "OverlapNCC": 0.9948571876314855,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": -28.29911597437831,
+      "dx_px": -256.635979384258,
+      "Confidence": 0.10339041725661549,
+      "OverlapNCC": 0.9951228712029623,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": -17.953563128030055,
+      "dx_px": -166.72774049140867,
+      "Confidence": 0.1539089727825329,
+      "OverlapNCC": 0.9941329117655514,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": -15.947854408730336,
+      "dx_px": -143.87996371876352,
+      "Confidence": 0.2348430432763955,
+      "OverlapNCC": 0.9943818003195498,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": -22.24946744643148,
+      "dx_px": -206.89987120716046,
+      "Confidence": 0.23729104445710789,
+      "OverlapNCC": 0.9946145802574671,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": -20.275412351237037,
+      "dx_px": -185.77640446617397,
+      "Confidence": 0.2539111907222206,
+      "OverlapNCC": 0.9929412827290272,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": -22.07639178795398,
+      "dx_px": -205.16671062239698,
+      "Confidence": 0.3183507008181198,
+      "OverlapNCC": 0.9940497763097997,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": -23.146264474124337,
+      "dx_px": -216.76002227190907,
+      "Confidence": 0.25109867212122705,
+      "OverlapNCC": 0.994774932202194,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": -22.190395162556342,
+      "dx_px": -203.1797375942167,
+      "Confidence": 0.20979092305121283,
+      "OverlapNCC": 0.9944571650743129,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": -24.327555441332834,
+      "dx_px": -225.14508091183757,
+      "Confidence": 0.13396172245886417,
+      "OverlapNCC": 0.9945315724780996,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": -25.269751476939064,
+      "dx_px": -225.94306595369244,
+      "Confidence": 0.10626411197065683,
+      "OverlapNCC": 0.9948025651411543,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": -21.048367870430866,
+      "dx_px": -196.69615624842618,
+      "Confidence": 0.08428889046291282,
+      "OverlapNCC": 0.9936203350204613,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 547.8898671403356,
+      "dx_px": -60.08874274888649,
+      "Confidence": 0.05108436463195382,
+      "OverlapNCC": 0.993790096626009,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 29.64598116734011,
+      "dx_px": 278.78156764319823,
+      "Confidence": 0.10960585336765252,
+      "OverlapNCC": 0.9923406822305815,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 21.440615915832975,
+      "dx_px": 206.0070968985713,
+      "Confidence": 0.17588521534259718,
+      "OverlapNCC": 0.9909309706150718,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 7.69127333545212,
+      "dx_px": 62.95222424440653,
+      "Confidence": 0.4070115641535567,
+      "OverlapNCC": 0.99426086026109,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 26.01791201782761,
+      "dx_px": 236.13898284646802,
+      "Confidence": 0.4805918266987712,
+      "OverlapNCC": 0.9791971043864279,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 36.66522130493324,
+      "dx_px": 335.0863141886929,
+      "Confidence": 0.34471052823978987,
+      "OverlapNCC": 0.8492799589800079,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 12.073358446790609,
+      "dx_px": 111.06488176214134,
+      "Confidence": 0.6795263364667308,
+      "OverlapNCC": 0.9241013818835019,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 31.066478622592278,
+      "dx_px": 290.82379955208444,
+      "Confidence": 0.5295214034636706,
+      "OverlapNCC": 0.909408778049145,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 21.964076602207356,
+      "dx_px": 201.890597497516,
+      "Confidence": 0.5186391243101567,
+      "OverlapNCC": 0.9619158415074223,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 29.65449049760561,
+      "dx_px": 274.0957205080793,
+      "Confidence": 0.35372995026318044,
+      "OverlapNCC": 0.9948231474036924,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 20.168351346797607,
+      "dx_px": 184.03918054798805,
+      "Confidence": 0.22635065500462204,
+      "OverlapNCC": 0.9970242228479874,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 13.714097801438013,
+      "dx_px": 127.27400906630827,
+      "Confidence": 0.15602029874510437,
+      "OverlapNCC": 0.9961650740673678,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 522.8607757023595,
+      "dx_px": -57.030863464992535,
+      "Confidence": 0.08863994663783409,
+      "OverlapNCC": 0.9963157940642374,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": -18.936090011942497,
+      "dx_px": -166.10299416851058,
+      "Confidence": 0.16200098836790813,
+      "OverlapNCC": 0.9963789790965406,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": -9.989399449991197,
+      "dx_px": -92.7760821900979,
+      "Confidence": 0.22232918003733437,
+      "OverlapNCC": 0.9957018775065266,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": -25.06349667185941,
+      "dx_px": -236.7421704571766,
+      "Confidence": 0.22144130553020241,
+      "OverlapNCC": 0.9783693172489245,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": -19.090583137602835,
+      "dx_px": -174.33127001863045,
+      "Confidence": 0.3853528855472557,
+      "OverlapNCC": 0.9271457533528868,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": -21.786270888761692,
+      "dx_px": -197.75387715653846,
+      "Confidence": 0.3898202270262452,
+      "OverlapNCC": 0.8566621369032821,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": -22.131490076421642,
+      "dx_px": -203.45227335744835,
+      "Confidence": 0.40032367285641146,
+      "OverlapNCC": 0.8466166491692222,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": -25.052413231794617,
+      "dx_px": -229.94545707486395,
+      "Confidence": 0.5638117087247935,
+      "OverlapNCC": 0.9237211419639098,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": -25.996157490032147,
+      "dx_px": -238.1323297854874,
+      "Confidence": 0.5444063519368273,
+      "OverlapNCC": 0.9096515719903903,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": -23.230814377226125,
+      "dx_px": -211.70247150155183,
+      "Confidence": 0.3060418542920015,
+      "OverlapNCC": 0.8923811109350662,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": -20.936826160294913,
+      "dx_px": -191.76886141326213,
+      "Confidence": 0.24918473725231188,
+      "OverlapNCC": 0.9682670651001616,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": -23.019070128447993,
+      "dx_px": -207.34229677997155,
+      "Confidence": 0.15456975637229417,
+      "OverlapNCC": 0.9940912745120011,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": -11.299089674336983,
+      "dx_px": -107.9607307746628,
+      "Confidence": 0.16753476773769474,
+      "OverlapNCC": 0.9969912867389866,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": -18.973104202038257,
+      "dx_px": -175.48690002129456,
+      "Confidence": 0.09815393095418323,
+      "OverlapNCC": 0.9955876305714032,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 294.05475091611453,
+      "dx_px": -32.17602567406993,
+      "Confidence": 0.08632045373231229,
+      "OverlapNCC": 0.9951286398193083,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 25.170641943090175,
+      "dx_px": 238.18047385553942,
+      "Confidence": 0.09782485707910377,
+      "OverlapNCC": 0.9954541151895867,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 14.725502242524383,
+      "dx_px": 128.06680730146417,
+      "Confidence": 0.15426301148480176,
+      "OverlapNCC": 0.9965917544969775,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 17.236860492808212,
+      "dx_px": 160.17074806129273,
+      "Confidence": 0.1503688651596507,
+      "OverlapNCC": 0.9962595216779362,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 28.54520825660463,
+      "dx_px": 263.2209794336093,
+      "Confidence": 0.18156789947098637,
+      "OverlapNCC": 0.9841975932909164,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 21.805203038975826,
+      "dx_px": 200.94793301839943,
+      "Confidence": 0.26792541811782433,
+      "OverlapNCC": 0.9061847796728469,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 16.26885158703921,
+      "dx_px": 149.2195968087494,
+      "Confidence": 0.25698186460612393,
+      "OverlapNCC": 0.8629661303308099,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 0.007968492326866193,
+      "dx_px": 0.02246722344208824,
+      "Confidence": 0.5180475335274957,
+      "OverlapNCC": 0.9490354990510592,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 13.234539957205813,
+      "dx_px": 125.03284428171717,
+      "Confidence": 0.3652773235718862,
+      "OverlapNCC": 0.893170898516015,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 8.136652826807014,
+      "dx_px": 76.9422415347154,
+      "Confidence": 0.42751955710254513,
+      "OverlapNCC": 0.9282004393172314,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 6.942144253052838,
+      "dx_px": 63.33778803489621,
+      "Confidence": 0.3790242341266864,
+      "OverlapNCC": 0.8860694255751623,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 9.066899139508113,
+      "dx_px": 80.17844259271605,
+      "Confidence": 0.4201405506967385,
+      "OverlapNCC": 0.9184088617108032,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 9.097947480959327,
+      "dx_px": 85.59295284814368,
+      "Confidence": 0.2980850088415172,
+      "OverlapNCC": 0.8744546655873675,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 10.000758956122382,
+      "dx_px": 88.42983529160301,
+      "Confidence": 0.32917100984828335,
+      "OverlapNCC": 0.9082955292286399,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 10.868268537670598,
+      "dx_px": 103.12962090934462,
+      "Confidence": 0.29521030989914543,
+      "OverlapNCC": 0.9275696455798417,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 8.956848502384192,
+      "dx_px": 80.06550811821369,
+      "Confidence": 0.3391464391949994,
+      "OverlapNCC": 0.9754199909644803,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 7.94627266908272,
+      "dx_px": 73.88175595665346,
+      "Confidence": 0.31441483559876116,
+      "OverlapNCC": 0.9876470970667018,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 10.071017767463518,
+      "dx_px": 86.22340401766827,
+      "Confidence": 0.2622462897475406,
+      "OverlapNCC": 0.9882667502259115,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 7.145473836202391,
+      "dx_px": 68.10776325122278,
+      "Confidence": 0.24382803742749265,
+      "OverlapNCC": 0.9913167054273542,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 23.205754142337238,
+      "dx_px": 207.26827344564612,
+      "Confidence": 0.1385138781726373,
+      "OverlapNCC": 0.9952653272742676,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 16.381638935974692,
+      "dx_px": 148.2584679466731,
+      "Confidence": 0.09158644840454397,
+      "OverlapNCC": 0.9949983813619442,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 7.272853007905989,
+      "dx_px": 69.93993692252872,
+      "Confidence": 0.0876203173978303,
+      "OverlapNCC": 0.9964405709830026,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 6.128960647236077,
+      "dx_px": 59.966046320858666,
+      "Confidence": 0.08973269066226158,
+      "OverlapNCC": 0.9961600191708181,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 0.10495735620462232,
+      "dx_px": -0.003973655778618537,
+      "Confidence": 0.2969726366496812,
+      "OverlapNCC": 0.9981989639454311,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 612.9402877568831,
+      "dx_px": -1198.0167949373958,
+      "Confidence": 0.006443795475712703,
+      "OverlapNCC": 0.24506437826297262,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": -0.0010251315630355876,
+      "dx_px": -0.005019566585469909,
+      "Confidence": 0.4014874573751621,
+      "OverlapNCC": 0.9994688834016394,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": -25.078399658203125,
+      "dx_px": 27.647979736328125,
+      "Confidence": 0.0,
+      "OverlapNCC": 0.6569700780100391,
+      "Method": "OpenCV-ORB"
+    },
+    {
+      "dy_px": -24.274292417939705,
+      "dx_px": 338.31351836294465,
+      "Confidence": 0.03154584782349783,
+      "OverlapNCC": 0.9921125794756259,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": -21.346474094956875,
+      "dx_px": 296.2570595968659,
+      "Confidence": 0.04849931293343741,
+      "OverlapNCC": 0.9938329710232388,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": -24.624589072014487,
+      "dx_px": 329.2952082269249,
+      "Confidence": 0.061893728817645495,
+      "OverlapNCC": 0.993477975623292,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": -17.223498607351303,
+      "dx_px": 233.45257699053442,
+      "Confidence": 0.07967770164278055,
+      "OverlapNCC": 0.9917398926032109,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": -19.002949296940642,
+      "dx_px": 260.24303903043614,
+      "Confidence": 0.09664421100228152,
+      "OverlapNCC": 0.9924503480817503,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": -29.208344403428327,
+      "dx_px": 411.2733164482613,
+      "Confidence": 0.06898637984233466,
+      "OverlapNCC": 0.994151711775266,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": -10.649191431102054,
+      "dx_px": 142.95739882067048,
+      "Confidence": 0.08151564155445751,
+      "OverlapNCC": 0.9959990781398002,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": -9.901621567648135,
+      "dx_px": 135.82081471858902,
+      "Confidence": 0.08104930565600774,
+      "OverlapNCC": 0.9956687270185737,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": -1.151205383777551,
+      "dx_px": -1.0412921195647868,
+      "Confidence": 0.11059349627567018,
+      "OverlapNCC": 0.6821493914566953,
+      "Method": "PhaseCorrelation"
+    }
+  ],
+  "CompositeShape": [
+    4073,
+    5581
+  ],
+  "Frames": [
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0000.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0001.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0002.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0003.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0004.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0005.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0006.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0007.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0008.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0009.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0010.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0011.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0012.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0013.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0014.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0015.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0016.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0017.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0018.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0019.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0020.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0021.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0022.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0023.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0024.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0025.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0026.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0027.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0028.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0029.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0030.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0031.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0032.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0033.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0034.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0035.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0036.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0037.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0038.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0039.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0040.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0041.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0042.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0043.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0044.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0045.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0046.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0047.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0048.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0049.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0050.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0051.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0052.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0053.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0054.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0055.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0056.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0057.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0058.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0059.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0060.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0061.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0062.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0063.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0064.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0065.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0066.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0067.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0068.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0069.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0070.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0071.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0072.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0073.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0074.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0075.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0076.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0077.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0078.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0079.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0080.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0081.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0082.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0083.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0084.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0085.npy",
+    "data/manual_scan-2026-07-08_13-25-14/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0086.npy"
+  ],
+  "Config": {
+    "Method": "auto",
+    "MinOverlapNCC": 0.6,
+    "MinOverlap_px": 1024,
+    "NormalizationPercentiles": [
+      0.5,
+      99.8
+    ],
+    "Colormap": "inferno"
+  }
+}

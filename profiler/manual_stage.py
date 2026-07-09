@@ -107,7 +107,6 @@ class ManualStageSession:
         try:
             if image_result.IsIncomplete():
                 return None
-
             return np.array(image_result.GetNDArray(), copy=True)
 
         finally:

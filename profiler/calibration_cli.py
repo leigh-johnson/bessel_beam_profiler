@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 import datetime as dt
 
@@ -79,6 +80,13 @@ def calibrate() -> None:
     show_default=True,
     type=click.FloatRange(min=0.0, max=1.0),
 )
+@click.option(
+    "--notes",
+    prompt="Notes on the optical setup (e.g. 'after axicon#2, OD 1.0 filter')",
+    default="",
+    help="Free-text note saved in the calibrated camera settings JSON. "
+    "Prompted for interactively when not given.",
+)
 def exposure(
     camera_settings_path: Path,
     output_json_path: Path,
@@ -89,7 +97,8 @@ def exposure(
     pixel_format: str,
     allowed_saturated_pixels: int,
     acquisition_timeout_ms: int,
-    saturation_threshold_percent: float,    
+    saturation_threshold_percent: float,
+    notes: str,
 ) -> None:
     """
     Launch the interactive exposure calibration GUI.
@@ -106,6 +115,10 @@ def exposure(
     else:
         # use default settings if no camera settings file is provided
         base_settings = FLIRCameraSettings()
+
+    # Notes travel with the calibrated settings JSON so we know which optical
+    # setup the exposure was calibrated for.
+    base_settings = replace(base_settings, Notes=notes.strip() or None)
 
     config = ExposureCalibrationConfig(
         InitialExposure_us=initial_exposure_us,

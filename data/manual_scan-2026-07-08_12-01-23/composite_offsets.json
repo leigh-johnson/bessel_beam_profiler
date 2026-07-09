@@ -1,0 +1,111 @@
+{
+  "OffsetsPx": [
+    {
+      "dy_px": 0.0,
+      "dx_px": 0.0
+    },
+    {
+      "dy_px": -0.003232901431919897,
+      "dx_px": -0.011953315182670305
+    },
+    {
+      "dy_px": 37.53880504566373,
+      "dx_px": 353.78335251491956
+    },
+    {
+      "dy_px": 18.46883126716252,
+      "dx_px": 699.8872149752142
+    },
+    {
+      "dy_px": 37.32098523659168,
+      "dx_px": 872.0161863542296
+    },
+    {
+      "dy_px": 85.41391015850206,
+      "dx_px": 1316.387731825269
+    },
+    {
+      "dy_px": 8.482545820800738,
+      "dx_px": 1324.8350569871272
+    },
+    {
+      "dy_px": 21.328583820033078,
+      "dx_px": 1445.0415761208485
+    }
+  ],
+  "PairwiseShifts": [
+    {
+      "dy_px": -0.003232901431919897,
+      "dx_px": -0.011953315182670305,
+      "Confidence": 0.4018480430403864,
+      "OverlapNCC": 0.9992123216001785,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 37.54203794709565,
+      "dx_px": 353.7953058301022,
+      "Confidence": 0.055269090630801126,
+      "OverlapNCC": 0.991108279024221,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": -19.069973778501208,
+      "dx_px": 346.10386246029464,
+      "Confidence": 0.06687185611870164,
+      "OverlapNCC": 0.9906221265132016,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 18.85215396942916,
+      "dx_px": 172.12897137901538,
+      "Confidence": 0.1143860423856655,
+      "OverlapNCC": 0.9926329248493101,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 48.09292492191038,
+      "dx_px": 444.3715454710393,
+      "Confidence": 0.07634801844140984,
+      "OverlapNCC": 0.9917300993155661,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": -76.93136433770132,
+      "dx_px": 8.447325161858352,
+      "Confidence": 0.10730621079949755,
+      "OverlapNCC": 0.9819052059312279,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 12.84603799923234,
+      "dx_px": 120.20651913372122,
+      "Confidence": 0.10850989694271473,
+      "OverlapNCC": 0.9886998768494706,
+      "Method": "PhaseCorrelation"
+    }
+  ],
+  "CompositeShape": [
+    1621,
+    3493
+  ],
+  "Frames": [
+    "data/manual_scan-2026-07-08_12-01-23/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0000.npy",
+    "data/manual_scan-2026-07-08_12-01-23/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0001.npy",
+    "data/manual_scan-2026-07-08_12-01-23/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0002.npy",
+    "data/manual_scan-2026-07-08_12-01-23/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0003.npy",
+    "data/manual_scan-2026-07-08_12-01-23/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0004.npy",
+    "data/manual_scan-2026-07-08_12-01-23/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0005.npy",
+    "data/manual_scan-2026-07-08_12-01-23/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0006.npy",
+    "data/manual_scan-2026-07-08_12-01-23/manual-stage-tablezp000055.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0007.npy"
+  ],
+  "Config": {
+    "Method": "auto",
+    "MinOverlapNCC": 0.6,
+    "MinOverlap_px": 1024,
+    "NormalizationPercentiles": [
+      0.5,
+      99.8
+    ],
+    "Colormap": "inferno"
+  }
+}
