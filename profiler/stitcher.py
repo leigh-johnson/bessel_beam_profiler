@@ -72,8 +72,21 @@ class StitchConfig:
     # OpenCV fallback and keeps whichever estimate validates better.
     MinOverlapNCC: float = 0.6
 
-    # Candidate shifts must imply at least this many overlapping pixels.
+    # Candidate shifts must imply at least this many overlapping pixels...
     MinOverlap_px: int = 1024
+
+    # ...and at least this fraction of the frame area. Absolute pixel counts
+    # alone let a 1-column sliver of a 1536-row frame pass the gate, and a
+    # near-featureless sliver can validate spuriously well (this produced a
+    # full-frame-width offset error in the 2026-07-09 16-35-33 scan).
+    MinOverlapFraction: float = 0.05
+
+    # How many phase-correlation peaks to validate by direct overlap
+    # correlation. Stationary sensor artifacts (dust shadows, fixed-pattern
+    # noise) put a spurious peak at exactly (0, 0) that can out-vote the
+    # true stage motion on smooth beam profiles, so the global argmax alone
+    # is not trustworthy.
+    NumPhasePeaks: int = 5
 
     # Percentile normalization applied before registration (robust to hot
     # pixels) and when rendering the composite PNG.
@@ -194,20 +207,58 @@ def overlap_ncc(
     return float(np.sum(a * b) / denom)
 
 
+def _top_correlation_peaks(
+    correlation: np.ndarray,
+    num_peaks: int,
+    *,
+    suppression_radius: int = 8,
+) -> list[tuple[int, int]]:
+    """
+    Locate the `num_peaks` highest local maxima of a (circular) correlation
+    surface, greedily suppressing a small wrap-around neighborhood after
+    each pick so the returned peaks are distinct.
+    """
+
+    surface = correlation.copy()
+    h, w = surface.shape
+    peaks: list[tuple[int, int]] = []
+
+    for _ in range(num_peaks):
+        flat = int(np.argmax(surface))
+        py, px = np.unravel_index(flat, surface.shape)
+
+        if not np.isfinite(surface[py, px]):
+            break
+
+        peaks.append((int(py), int(px)))
+
+        ys = np.arange(py - suppression_radius, py + suppression_radius + 1) % h
+        xs = np.arange(px - suppression_radius, px + suppression_radius + 1) % w
+        surface[np.ix_(ys, xs)] = -np.inf
+
+    return peaks
+
+
 def phase_correlation_shift(
     ref: np.ndarray,
     mov: np.ndarray,
     *,
     percentiles: tuple[float, float] = (0.5, 99.8),
     min_overlap_px: int = 1024,
+    num_peaks: int = 5,
 ) -> ShiftEstimate:
     """
     Estimate the translation of `mov` relative to `ref` via phase correlation.
 
     Circular FFT correlation only determines the shift modulo the frame size,
-    so each axis has two plausible branches (d and d - N). All four
-    combinations are validated by direct overlap correlation and the best
-    one wins — this makes stage moves larger than half the sensor size work.
+    so each axis has two plausible branches (d and d - N). Additionally, the
+    global correlation maximum is not always the true motion: anything that
+    stays fixed on the sensor between frames (dust shadows, fixed-pattern
+    noise, etalon fringes) contributes a spurious peak at exactly (0, 0),
+    which can beat the real peak when the beam profile is smooth and the
+    stage step is small. So the top `num_peaks` peaks — each with its four
+    wrap-around branches — are validated by direct overlap correlation
+    against the actual pixels, and the best-validating candidate wins.
     """
 
     if ref.shape != mov.shape:
@@ -234,43 +285,45 @@ def phase_correlation_shift(
 
     correlation = np.fft.irfft2(cross_power / magnitude, s=ref.shape)
 
-    peak_flat = int(np.argmax(correlation))
-    peak_y, peak_x = np.unravel_index(peak_flat, correlation.shape)
-
-    confidence = float(correlation[peak_y, peak_x])
-
-    # Sub-pixel refinement along each axis (with wrap-around neighbors).
-    row = correlation[peak_y, :]
-    col = correlation[:, peak_x]
-
-    frac_x = _parabolic_subpixel(np.roll(row, 1 - peak_x), 1) if row.size > 2 else 0.0
-    frac_y = _parabolic_subpixel(np.roll(col, 1 - peak_y), 1) if col.size > 2 else 0.0
-
-    # With mov(y, x) == ref(y + d, x + d'), the cross-power spectrum is
-    # exp(-2*pi*i*k*d/N) and its inverse FFT peaks exactly at (d, d') —
-    # the field-of-view (camera) displacement between the frames — but only
-    # modulo the frame size. Disambiguate the wraparound branches by direct
-    # overlap validation.
-    dy_base = float(peak_y) + frac_y
-    dx_base = float(peak_x) + frac_x
-
     h, w = ref.shape
 
-    candidates = [
-        (dy_cand, dx_cand)
-        for dy_cand in (dy_base, dy_base - h)
-        for dx_cand in (dx_base, dx_base - w)
-    ]
-
     best_dy, best_dx, best_ncc = 0.0, 0.0, -np.inf
+    confidence = 0.0
 
-    for dy_cand, dx_cand in candidates:
-        ncc = overlap_ncc(
-            ref, mov, dy_cand, dx_cand, min_overlap_px=min_overlap_px
+    for peak_y, peak_x in _top_correlation_peaks(correlation, num_peaks):
+        # Sub-pixel refinement along each axis (with wrap-around neighbors).
+        row = correlation[peak_y, :]
+        col = correlation[:, peak_x]
+
+        frac_x = (
+            _parabolic_subpixel(np.roll(row, 1 - peak_x), 1) if row.size > 2 else 0.0
+        )
+        frac_y = (
+            _parabolic_subpixel(np.roll(col, 1 - peak_y), 1) if col.size > 2 else 0.0
         )
 
-        if ncc > best_ncc:
-            best_dy, best_dx, best_ncc = dy_cand, dx_cand, ncc
+        # With mov(y, x) == ref(y + d, x + d'), the cross-power spectrum is
+        # exp(-2*pi*i*k*d/N) and its inverse FFT peaks exactly at (d, d') —
+        # the field-of-view (camera) displacement between the frames — but
+        # only modulo the frame size. Disambiguate the wraparound branches
+        # by direct overlap validation.
+        dy_base = float(peak_y) + frac_y
+        dx_base = float(peak_x) + frac_x
+
+        candidates = [
+            (dy_cand, dx_cand)
+            for dy_cand in (dy_base, dy_base - h)
+            for dx_cand in (dx_base, dx_base - w)
+        ]
+
+        for dy_cand, dx_cand in candidates:
+            ncc = overlap_ncc(
+                ref, mov, dy_cand, dx_cand, min_overlap_px=min_overlap_px
+            )
+
+            if ncc > best_ncc:
+                best_dy, best_dx, best_ncc = dy_cand, dx_cand, ncc
+                confidence = float(correlation[peak_y, peak_x])
 
     return ShiftEstimate(
         dy_px=best_dy,
@@ -365,12 +418,18 @@ def estimate_shift(
     mov: np.ndarray,
     config: StitchConfig,
 ) -> ShiftEstimate:
+    min_overlap_px = max(
+        config.MinOverlap_px,
+        int(config.MinOverlapFraction * ref.shape[0] * ref.shape[1]),
+    )
+
     if config.Method == "phase":
         return phase_correlation_shift(
             ref,
             mov,
             percentiles=config.NormalizationPercentiles,
-            min_overlap_px=config.MinOverlap_px,
+            min_overlap_px=min_overlap_px,
+            num_peaks=config.NumPhasePeaks,
         )
 
     if config.Method == "opencv":
@@ -378,7 +437,7 @@ def estimate_shift(
             ref,
             mov,
             percentiles=config.NormalizationPercentiles,
-            min_overlap_px=config.MinOverlap_px,
+            min_overlap_px=min_overlap_px,
         )
 
     if config.Method != "auto":
@@ -391,7 +450,8 @@ def estimate_shift(
         ref,
         mov,
         percentiles=config.NormalizationPercentiles,
-        min_overlap_px=config.MinOverlap_px,
+        min_overlap_px=min_overlap_px,
+        num_peaks=config.NumPhasePeaks,
     )
 
     if estimate.OverlapNCC >= config.MinOverlapNCC:
@@ -402,7 +462,7 @@ def estimate_shift(
             ref,
             mov,
             percentiles=config.NormalizationPercentiles,
-            min_overlap_px=config.MinOverlap_px,
+            min_overlap_px=min_overlap_px,
         )
     except StitchError:
         return estimate  # keep the phase result; nothing better available
