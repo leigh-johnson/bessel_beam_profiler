@@ -108,6 +108,45 @@ def test_phase_correlation_shift_larger_than_half_frame(scene):
     assert shift.OverlapNCC > 0.9
 
 
+def test_phase_correlation_ignores_fixed_pattern_noise():
+    """
+    Anything glued to the sensor (dust shadows, fixed-pattern noise) is
+    identical in both frames and puts a spurious correlation peak at exactly
+    (0, 0). On a smooth beam with a small stage step that peak can beat the
+    true-motion peak — this is what broke the 2026-07-09 manual scans, where
+    long runs of pairwise shifts collapsed to zero. Overlap validation of
+    the top peaks must recover the real shift anyway.
+    """
+
+    from scipy.ndimage import gaussian_filter
+
+    rng = np.random.default_rng(3)
+
+    scene = make_bessel_scene(noise_rms=0.0).astype(np.float64)
+
+    # Dust-like static sensor pattern, identical in both frames.
+    tile = 384
+    fixed_pattern = gaussian_filter(rng.normal(size=(tile, tile)), sigma=1.0)
+    fixed_pattern *= 20.0 / fixed_pattern.std()
+
+    # A small stage step (~6% of the frame), like a manual micrometer scan.
+    a = scene[100 : 100 + tile, 100 : 100 + tile] + fixed_pattern
+    b = scene[105 : 105 + tile, 125 : 125 + tile] + fixed_pattern
+
+    # The spurious (0, 0) peak really is the global maximum here: trusting
+    # the single argmax (num_peaks=1) locks onto the fixed pattern.
+    argmax_only = stitcher.phase_correlation_shift(a, b, num_peaks=1)
+    assert abs(argmax_only.dy_px) < 1.0 and abs(argmax_only.dx_px) < 1.0
+
+    # Validating the top peaks against the actual pixels recovers the
+    # true stage motion.
+    shift = stitcher.phase_correlation_shift(a, b)
+
+    assert shift.dy_px == pytest.approx(5.0, abs=1.0)
+    assert shift.dx_px == pytest.approx(25.0, abs=1.0)
+    assert shift.OverlapNCC > 0.9
+
+
 def test_phase_correlation_rejects_mismatched_shapes():
     with pytest.raises(stitcher.StitchError, match="identical shapes"):
         stitcher.phase_correlation_shift(
