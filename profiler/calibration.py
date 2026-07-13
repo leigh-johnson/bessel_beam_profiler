@@ -228,6 +228,9 @@ def calibrate_exposure_interactive(
         print(f"Saved: {output_json_path.with_suffix('.npy')}")
     finally:
         flir_camera_controller._end_acquisition()
+        # Release the camera deterministically so callers (e.g. the manual
+        # dataset sweep) can immediately reopen it with the calibrated settings.
+        flir_camera_controller.close()
 
 
     final_settings = replace(

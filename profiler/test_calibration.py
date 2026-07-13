@@ -17,6 +17,7 @@ class FakeCameraController:
     def __init__(self, camera_index, camera_settings):
         self.cam = camera_index
         self.camera_settings = camera_settings
+        self.closed = False
 
     def apply_settings(self):
         self.camera_settings.apply(self.cam, strict=True)
@@ -29,6 +30,9 @@ class FakeCameraController:
 
     def _execute_software_trigger(self):
         pass
+
+    def close(self):
+        self.closed = True
 
 
 class FakeImageArtist:
