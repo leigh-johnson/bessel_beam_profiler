@@ -378,3 +378,57 @@ def test_image_is_overexposed(monkeypatch):
     assert is_overexposed
     assert max_value == 255
     assert saturated_pixels == 2
+
+def test_error_in_acquisition_loop_closes_camera_and_drops_image_refs(
+    modules,
+    monkeypatch,
+    tmp_path,
+):
+    """
+    An exception inside the acquisition loop must still close the camera,
+    and the propagating traceback must not pin any image locals: a live
+    ImagePtr reference makes Spinnaker's cleanup raise -1004 ("something
+    still holds a reference to the camera") and abort the process.
+    """
+    calibration, camera_settings = modules
+
+    controllers = []
+
+    class RecordingController(FakeCameraController):
+        def __init__(self, camera_index, camera_settings):
+            super().__init__(camera_index, camera_settings)
+            controllers.append(self)
+
+    monkeypatch.setattr(calibration, "FLIRCameraControllerBase", RecordingController)
+
+    # Never press a key: the loop keeps polling until the camera fails.
+    install_fake_matplotlib(monkeypatch, calibration, keys_by_pause={})
+
+    # One good frame, then GetNextImage raises ("No fake images left").
+    cam = FakeCamera(
+        images=[FakeImage(np.array([[1, 2], [3, 4]], dtype=np.uint16))]
+    )
+
+    with pytest.raises(RuntimeError, match="No fake images left") as excinfo:
+        calibration.calibrate_exposure_interactive(
+            cam,
+            make_base_settings(camera_settings, exposure_us=1000.0),
+            output_json_path=tmp_path / "camera_settings.json",
+            config=calibration.ExposureCalibrationConfig(
+                AcquisitionTimeout_ms=123,
+                DisplayPause_s=0,
+            ),
+        )
+
+    # The camera was still released, despite the error...
+    assert controllers[0].closed
+    assert cam.events[-1] == "end"
+
+    # ...and no traceback frame still references an image.
+    tb = excinfo.value.__traceback__
+    while tb is not None:
+        for name, value in tb.tb_frame.f_locals.items():
+            assert not isinstance(value, FakeImage), (
+                f"traceback frame local {name!r} pins a camera image"
+            )
+        tb = tb.tb_next

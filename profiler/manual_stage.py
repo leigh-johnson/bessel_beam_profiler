@@ -111,6 +111,11 @@ class ManualStageSession:
 
         finally:
             image_result.Release()
+            # A PySpin ImagePtr keeps the camera referenced even after
+            # Release(); if this local survives in the traceback of a
+            # propagating exception, the camera cannot be released at
+            # cleanup (Spinnaker error -1004).
+            image_result = None
 
     # ------------------------------------------------------------------
     # Saving

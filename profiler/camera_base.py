@@ -2,8 +2,11 @@ from __future__ import annotations  # avoid evaluating PySpin type hints at impo
 
 import PySpin
 import gc
+import logging
 
 from camera_settings import FLIRCameraSettings
+
+logger = logging.getLogger(__name__)
 
 class FLIRCameraError(RuntimeError):
     pass
@@ -59,8 +62,8 @@ class FLIRCameraControllerBase:
     def __del__(self):
         try:
             self.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"Exception during camera cleanup in __del__: {e}")
 
     def apply_settings(self) -> None:
         """
@@ -142,3 +145,12 @@ class FLIRCameraControllerBase:
             system.ReleaseInstance()
         except Exception as ex:
             _warn_cleanup_failure("System.ReleaseInstance", ex)
+            try:
+                # The failed release left the SWIG wrapper owning the system;
+                # its C++ destructor would retry the release, and a Spinnaker
+                # exception thrown inside a destructor aborts the whole
+                # process (libc++abi terminate). Disown the wrapper and let
+                # the OS reclaim the camera at process exit instead.
+                system.thisown = False
+            except Exception as e:
+                logger.error(f"Exception during camera cleanup in __del__: {e}")
