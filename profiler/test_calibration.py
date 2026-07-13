@@ -32,6 +32,9 @@ class FakeCameraController:
         pass
 
     def close(self):
+        # Mirrors FLIRCameraControllerBase.close(), which ends acquisition
+        # before releasing the camera.
+        self.cam.EndAcquisition()
         self.closed = True
 
 

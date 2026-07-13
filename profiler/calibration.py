@@ -227,9 +227,10 @@ def calibrate_exposure_interactive(
         np.save(output_json_path.with_suffix('.npy'), arr)
         print(f"Saved: {output_json_path.with_suffix('.npy')}")
     finally:
-        flir_camera_controller._end_acquisition()
-        # Release the camera deterministically so callers (e.g. the manual
-        # dataset sweep) can immediately reopen it with the calibrated settings.
+        # close() ends acquisition (if still streaming) and releases the
+        # camera deterministically — and never raises — so callers (e.g. the
+        # manual dataset sweep) can immediately reopen it, and so an error in
+        # the loop above surfaces instead of being masked by cleanup.
         flir_camera_controller.close()
 
 
