@@ -96,6 +96,11 @@ def calibrate_exposure_interactive(
         Gain=0.0,
         GammaEnable=False,
         PixelFormat=config.PixelFormat,
+        # Calibration reads frames in free-run mode. TriggerMode persists on
+        # the camera hardware, so a previous software-triggered acquisition
+        # would otherwise starve GetNextImage of frames (-1011 timeouts).
+        TriggerMode="Off",
+        TriggerSource=None,
     )
 
     print("Initializing camera controller")

@@ -403,12 +403,18 @@ class FLIRCameraSettings:
                 messages,
             )
 
-        # set software trigger source
-        if self.TriggerSource is not None and self.TriggerMode == "On":
-            # Trigger must be Off before changing TriggerSource.
-            _set_enum(cam, "TriggerMode", "Off", strict, messages)
-            _set_enum(cam, "TriggerSource", self.TriggerSource, strict, messages)
-            _set_enum(cam, "TriggerMode", "On", strict, messages)
+        # Trigger mode. TriggerMode persists on the camera hardware across
+        # processes, so "Off" must be applied explicitly: otherwise a camera
+        # left in software-trigger mode by a previous acquisition never
+        # delivers free-run frames (GetNextImage times out with -1011).
+        if self.TriggerMode is not None:
+            if self.TriggerMode == "On" and self.TriggerSource is not None:
+                # Trigger must be Off before changing TriggerSource.
+                _set_enum(cam, "TriggerMode", "Off", strict, messages)
+                _set_enum(cam, "TriggerSource", self.TriggerSource, strict, messages)
+                _set_enum(cam, "TriggerMode", "On", strict, messages)
+            else:
+                _set_enum(cam, "TriggerMode", self.TriggerMode, strict, messages)
 
 
         return messages

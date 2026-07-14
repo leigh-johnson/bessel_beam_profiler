@@ -3,6 +3,8 @@ from __future__ import annotations  # avoid evaluating PySpin type hints at impo
 import PySpin
 import gc
 import logging
+import sys
+import traceback
 
 from camera_settings import FLIRCameraSettings
 
@@ -112,6 +114,21 @@ class FLIRCameraControllerBase:
             # Injected fake camera (unit tests): nothing to release.
             return
 
+        # When close() runs inside a finally block while an exception is
+        # propagating, the exception's traceback frames can pin camera
+        # references — notably the PySpin GetNextImage wrapper frame, whose
+        # `self` IS the camera. A pinned camera makes Clear/ReleaseInstance
+        # below raise -1004. Clearing the locals of those (non-executing)
+        # frames drops the pins; the traceback's file/line info is preserved,
+        # and still-executing frames are skipped automatically.
+        exc = sys.exc_info()[1]
+        seen_exceptions = set()
+        while exc is not None and id(exc) not in seen_exceptions:
+            seen_exceptions.add(id(exc))
+            if exc.__traceback__ is not None:
+                traceback.clear_frames(exc.__traceback__)
+            exc = exc.__cause__ or exc.__context__
+
         if cam is not None:
             try:
                 if cam.IsStreaming():
@@ -153,4 +170,4 @@ class FLIRCameraControllerBase:
                 # the OS reclaim the camera at process exit instead.
                 system.thisown = False
             except Exception as e:
-                logger.error(f"Exception during camera cleanup in __del__: {e}")
+                logger.error(f"Disowning the PySpin system wrapper failed: {e}")
