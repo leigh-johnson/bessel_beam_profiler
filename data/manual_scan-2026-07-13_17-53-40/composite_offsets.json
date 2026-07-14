@@ -1,0 +1,65 @@
+{
+  "OffsetsPx": [
+    {
+      "dy_px": 0.0,
+      "dx_px": 0.0
+    },
+    {
+      "dy_px": 160.82795741127873,
+      "dx_px": -16.141649867028036
+    },
+    {
+      "dy_px": 462.8575273582961,
+      "dx_px": -46.08094002734879
+    },
+    {
+      "dy_px": 586.5715830027735,
+      "dx_px": -58.10716908091763
+    }
+  ],
+  "PairwiseShifts": [
+    {
+      "dy_px": 160.82795741127873,
+      "dx_px": -16.141649867028036,
+      "Confidence": 0.03596985264841487,
+      "OverlapNCC": 0.9901914708926288,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 302.0295699470174,
+      "dx_px": -29.939290160320752,
+      "Confidence": 0.03280351274192315,
+      "OverlapNCC": 0.9879703068049592,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 123.71405564447737,
+      "dx_px": -12.02622905356884,
+      "Confidence": 0.02961618582225288,
+      "OverlapNCC": 0.9899670023340864,
+      "Method": "PhaseCorrelation"
+    }
+  ],
+  "CompositeShape": [
+    2123,
+    2106
+  ],
+  "Frames": [
+    "data/manual_scan-2026-07-13_17-53-40/manual-stage-axicon3-z90cm-tablezp000900.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0000.npy",
+    "data/manual_scan-2026-07-13_17-53-40/manual-stage-axicon3-z90cm-tablezp000900.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0001.npy",
+    "data/manual_scan-2026-07-13_17-53-40/manual-stage-axicon3-z90cm-tablezp000900.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0002.npy",
+    "data/manual_scan-2026-07-13_17-53-40/manual-stage-axicon3-z90cm-tablezp000900.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0003.npy"
+  ],
+  "Config": {
+    "Method": "auto",
+    "MinOverlapNCC": 0.6,
+    "MinOverlap_px": 1024,
+    "MinOverlapFraction": 0.05,
+    "NumPhasePeaks": 5,
+    "NormalizationPercentiles": [
+      0.5,
+      99.8
+    ],
+    "Colormap": "inferno"
+  }
+}
