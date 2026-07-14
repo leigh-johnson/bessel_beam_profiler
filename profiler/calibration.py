@@ -96,6 +96,11 @@ def calibrate_exposure_interactive(
         Gain=0.0,
         GammaEnable=False,
         PixelFormat=config.PixelFormat,
+        # Calibration reads frames in free-run mode. TriggerMode persists on
+        # the camera hardware, so a previous software-triggered acquisition
+        # would otherwise starve GetNextImage of frames (-1011 timeouts).
+        TriggerMode="Off",
+        TriggerSource=None,
     )
 
     print("Initializing camera controller")
@@ -151,6 +156,7 @@ def calibrate_exposure_interactive(
     flir_camera_controller._begin_acquisition()
     print(f"Starting exposure calibration with initial exposure = {state['exposure_us']:.3f} us")
     arr = None
+    image_result = None
     try:
         while state["running"]:
             timeout_ms = int(config.AcquisitionTimeout_ms + (state["exposure_us"] / 1000))
@@ -168,6 +174,11 @@ def calibrate_exposure_interactive(
 
             finally:
                 image_result.Release()
+                # A PySpin ImagePtr keeps the camera referenced even after
+                # Release(). If this local outlived the loop (e.g. in the
+                # traceback of a propagating exception), Spinnaker could not
+                # release the camera in close() below (error -1004).
+                image_result = None
 
             is_overexposed, max_value, saturated_pixels = image_is_overexposed(arr, config, strict=False)
 
@@ -215,19 +226,33 @@ def calibrate_exposure_interactive(
             fig.canvas.draw_idle()
             plt.pause(config.DisplayPause_s)
 
-        image_artist.set_data(arr)
-        ax.set_title(title) 
-        fig.canvas.draw_idle() 
-        fig.canvas.flush_events()
-        fig.savefig(output_json_path.with_suffix('.png'), dpi=140, bbox_inches='tight')
-        print(f"Saved: {output_json_path.with_suffix('.png')}")
+        if image_artist is None:
+            print("No frames were acquired; skipping calibration PNG/NPY snapshots.")
+        else:
+            image_artist.set_data(arr)
+            ax.set_title(title)
+            fig.canvas.draw_idle()
+            fig.canvas.flush_events()
+            fig.savefig(output_json_path.with_suffix('.png'), dpi=140, bbox_inches='tight')
+            print(f"Saved: {output_json_path.with_suffix('.png')}")
 
-        plt.close(fig)
-
-        np.save(output_json_path.with_suffix('.npy'), arr)
-        print(f"Saved: {output_json_path.with_suffix('.npy')}")
+            np.save(output_json_path.with_suffix('.npy'), arr)
+            print(f"Saved: {output_json_path.with_suffix('.npy')}")
+    except BaseException:
+        # While the finally-block cleanup runs, the propagating traceback
+        # keeps this frame (and its locals) alive. Drop anything that
+        # references the camera so close() can actually release it.
+        image_result = None
+        raise
     finally:
-        flir_camera_controller._end_acquisition()
+        # Unregister the preview window (and its key-press closure over the
+        # controller) even on the error path.
+        plt.close(fig)
+        # close() ends acquisition (if still streaming) and releases the
+        # camera deterministically — and never raises — so callers (e.g. the
+        # manual dataset sweep) can immediately reopen it, and so an error in
+        # the loop above surfaces instead of being masked by cleanup.
+        flir_camera_controller.close()
 
 
     final_settings = replace(

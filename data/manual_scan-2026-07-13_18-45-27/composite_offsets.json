@@ -1,0 +1,77 @@
+{
+  "OffsetsPx": [
+    {
+      "dy_px": 0.0,
+      "dx_px": 0.0
+    },
+    {
+      "dy_px": 259.79768831662244,
+      "dx_px": -25.906830937482937
+    },
+    {
+      "dy_px": 551.9112678574004,
+      "dx_px": -54.04288347019883
+    },
+    {
+      "dy_px": 565.772322952754,
+      "dx_px": 1.7590631618553587
+    },
+    {
+      "dy_px": 85.88101368736613,
+      "dx_px": -5.7843390919227815
+    }
+  ],
+  "PairwiseShifts": [
+    {
+      "dy_px": 259.79768831662244,
+      "dx_px": -25.906830937482937,
+      "Confidence": 0.03839518230999113,
+      "OverlapNCC": 0.9886702374506806,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 292.1135795407779,
+      "dx_px": -28.136052532715894,
+      "Confidence": 0.031048965278784944,
+      "OverlapNCC": 0.9886720155729103,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 13.86105509535368,
+      "dx_px": 55.80194663205419,
+      "Confidence": 0.03201807421304555,
+      "OverlapNCC": 0.9946500245279624,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": -479.8913092653879,
+      "dx_px": -7.54340225377814,
+      "Confidence": 0.02436749249318001,
+      "OverlapNCC": 0.9882649562193114,
+      "Method": "PhaseCorrelation"
+    }
+  ],
+  "CompositeShape": [
+    2102,
+    2104
+  ],
+  "Frames": [
+    "data/manual_scan-2026-07-13_18-45-27/manual-stage-axicon3-z85cm-tablezp000850.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0000.npy",
+    "data/manual_scan-2026-07-13_18-45-27/manual-stage-axicon3-z85cm-tablezp000850.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0001.npy",
+    "data/manual_scan-2026-07-13_18-45-27/manual-stage-axicon3-z85cm-tablezp000850.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0002.npy",
+    "data/manual_scan-2026-07-13_18-45-27/manual-stage-axicon3-z85cm-tablezp000850.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0003.npy",
+    "data/manual_scan-2026-07-13_18-45-27/manual-stage-axicon3-z85cm-tablezp000850.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0004.npy"
+  ],
+  "Config": {
+    "Method": "auto",
+    "MinOverlapNCC": 0.6,
+    "MinOverlap_px": 1024,
+    "MinOverlapFraction": 0.05,
+    "NumPhasePeaks": 5,
+    "NormalizationPercentiles": [
+      0.5,
+      99.8
+    ],
+    "Colormap": "inferno"
+  }
+}

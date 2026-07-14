@@ -1,0 +1,17 @@
+{
+  "CreatedUTC": "2026-07-14T01:31:35.926520+00:00",
+  "RunDir": "data/manual_scan-2026-07-13_18-31-33",
+  "Config": {
+    "JobType": "manual_scan",
+    "DatasetRoot": "data",
+    "AcquisitionTimeout_ms": 2000,
+    "StageTimeout_s": 30.0,
+    "SettleTime_s": 0.0,
+    "ImageExtension": ".npy"
+  },
+  "CoordinateConvention": {
+    "GantryPosition_mm": "Local CNC/gantry coordinates used for motion commands.",
+    "TablePosition_mm": "Optics-table / beamline coordinates used for reconstruction.",
+    "PlacementID": "Physical placement of the CNC gantry on the optics table."
+  }
+}

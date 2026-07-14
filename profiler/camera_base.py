@@ -2,8 +2,13 @@ from __future__ import annotations  # avoid evaluating PySpin type hints at impo
 
 import PySpin
 import gc
+import logging
+import sys
+import traceback
 
 from camera_settings import FLIRCameraSettings
+
+logger = logging.getLogger(__name__)
 
 class FLIRCameraError(RuntimeError):
     pass
@@ -32,16 +37,8 @@ def _open_camera(camera_index: int) -> PySpin.Camera:
     return system, cam_list, cam
 
 
-def _close_camera(system: PySpin.System, cam_list: PySpin.CameraList, cam: PySpin.Camera) -> None:
-    """
-    De-initialize and release a PySpin camera instance.
-
-    This is a separate function so that we can call it in a finally block
-    without having to check if cam is None.
-    """
-    cam_list = system.GetCameras()
-    cam.DeInit()
-    cam_list.Clear()
+def _warn_cleanup_failure(step: str, ex: Exception) -> None:
+    print(f"Warning: {step} during camera cleanup failed: {ex}")
 
 class FLIRCameraControllerBase:
     """
@@ -67,8 +64,8 @@ class FLIRCameraControllerBase:
     def __del__(self):
         try:
             self.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"Exception during camera cleanup in __del__: {e}")
 
     def apply_settings(self) -> None:
         """
@@ -95,6 +92,14 @@ class FLIRCameraControllerBase:
         command.Execute()
 
     def close(self) -> None:
+        """
+        End acquisition, de-initialize, and release the camera and system.
+
+        Deliberately never raises: this runs in finally blocks and __del__,
+        where a propagating Spinnaker exception can escape into C++ object
+        destructors and abort the whole process (error -1004, "Can't clear a
+        camera because something still holds a reference to the camera").
+        """
         print("Cleaning up PySpin Camera and System instances...")
 
         cam = getattr(self, "cam", None)
@@ -105,7 +110,64 @@ class FLIRCameraControllerBase:
         self.cam_list = None
         self.system = None
 
-        if system is not None:
-            _close_camera(system, cam_list, cam)
+        if system is None:
+            # Injected fake camera (unit tests): nothing to release.
+            return
 
+        # When close() runs inside a finally block while an exception is
+        # propagating, the exception's traceback frames can pin camera
+        # references — notably the PySpin GetNextImage wrapper frame, whose
+        # `self` IS the camera. A pinned camera makes Clear/ReleaseInstance
+        # below raise -1004. Clearing the locals of those (non-executing)
+        # frames drops the pins; the traceback's file/line info is preserved,
+        # and still-executing frames are skipped automatically.
+        exc = sys.exc_info()[1]
+        seen_exceptions = set()
+        while exc is not None and id(exc) not in seen_exceptions:
+            seen_exceptions.add(id(exc))
+            if exc.__traceback__ is not None:
+                traceback.clear_frames(exc.__traceback__)
+            exc = exc.__cause__ or exc.__context__
+
+        if cam is not None:
+            try:
+                if cam.IsStreaming():
+                    cam.EndAcquisition()
+            except Exception as ex:
+                _warn_cleanup_failure("EndAcquisition", ex)
+
+            try:
+                cam.DeInit()
+            except Exception as ex:
+                _warn_cleanup_failure("DeInit", ex)
+
+        # CameraList.Clear() raises -1004 if any Python object still
+        # references a camera, so drop every reference we hold first.
+        del cam
         gc.collect()
+
+        try:
+            if cam_list is not None:
+                cam_list.Clear()
+        except Exception as ex:
+            _warn_cleanup_failure("CameraList.Clear", ex)
+
+        del cam_list
+        gc.collect()
+
+        try:
+            # Balance the GetInstance() from _open_camera so the system is
+            # not torn down inside a C++ destructor at interpreter shutdown,
+            # where a Spinnaker exception would abort the process.
+            system.ReleaseInstance()
+        except Exception as ex:
+            _warn_cleanup_failure("System.ReleaseInstance", ex)
+            try:
+                # The failed release left the SWIG wrapper owning the system;
+                # its C++ destructor would retry the release, and a Spinnaker
+                # exception thrown inside a destructor aborts the whole
+                # process (libc++abi terminate). Disown the wrapper and let
+                # the OS reclaim the camera at process exit instead.
+                system.thisown = False
+            except Exception as e:
+                logger.error(f"Disowning the PySpin system wrapper failed: {e}")

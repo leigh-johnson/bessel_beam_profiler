@@ -1,9 +1,22 @@
 from __future__ import annotations
 
 from pathlib import Path
+import datetime as dt
+import re
 
 import click
 from dataset_writer import DatasetWriterJobType
+
+# Default optic configuration for the Bessel-beam line, prompted for at the
+# start of every manual XY sweep.
+DEFAULT_OPTIC_CONFIG = {
+    "GaussianBeamWaist_mm": 4.59, # see beam_gaussian_fit_analysis_$DATE.pynb
+    "Axicon1_deg": 5.0,
+    "Axicon2_deg": 5.0,
+    "Axicon3_deg": 0.5,
+    "L12_mm": 190.0,
+    "L23_mm": 50.0,
+}
 
 def _parse_metadata(metadata_items: tuple[str, ...]) -> dict[str, str]:
     metadata: dict[str, str] = {}
@@ -27,19 +40,26 @@ def _parse_metadata(metadata_items: tuple[str, ...]) -> dict[str, str]:
     return metadata
 
 
-def _load_camera_settings_for_software_trigger(camera_settings_path: Path | None):
+def _load_base_camera_settings(camera_settings_path: Path | None):
     """
-    Load FLIRCameraSettings from JSON (or defaults) and force software
-    triggering, which all dataset acquisition paths require.
+    Load FLIRCameraSettings from JSON, or defaults when no file is provided.
     """
 
     from camera_settings import FLIRCameraSettings
 
     if camera_settings_path is not None:
-        camera_settings = FLIRCameraSettings.from_json_file(camera_settings_path)
-    else:
-        # use default settings if no camera settings file is provided
-        camera_settings = FLIRCameraSettings()
+        return FLIRCameraSettings.from_json_file(camera_settings_path)
+
+    return FLIRCameraSettings()
+
+
+def _force_software_trigger(camera_settings):
+    """
+    Return a copy of the settings with software triggering forced on,
+    which all dataset acquisition paths require.
+    """
+
+    from camera_settings import FLIRCameraSettings
 
     # set software trigger mode if not already set in the camera settings
     if camera_settings.TriggerMode != "On":
@@ -53,6 +73,38 @@ def _load_camera_settings_for_software_trigger(camera_settings_path: Path | None
         camera_settings = FLIRCameraSettings(**camera_settings_old)
 
     return camera_settings
+
+
+def _load_camera_settings_for_software_trigger(camera_settings_path: Path | None):
+    """
+    Load FLIRCameraSettings from JSON (or defaults) and force software
+    triggering, which all dataset acquisition paths require.
+    """
+
+    return _force_software_trigger(_load_base_camera_settings(camera_settings_path))
+
+
+def _prompt_optic_configuration() -> dict[str, float]:
+    """
+    Prompt for the axicon angles and inter-optic spacings of the beamline.
+    ENTER accepts the defaults for the current Bessel-beam setup.
+    """
+
+    click.echo("Optic configuration (ENTER accepts the default):")
+
+    return {
+        name: click.prompt(f"  {name}", default=default, type=float)
+        for name, default in DEFAULT_OPTIC_CONFIG.items()
+    }
+
+
+def _position_slug(sensor_z_reference: str, sensor_z_cm: float) -> str:
+    """
+    Filename-safe tag for the sweep position, e.g. 'axicon3-z100.0cm'.
+    """
+
+    reference = re.sub(r"[^A-Za-z0-9_.-]+", "_", sensor_z_reference).strip("_")
+    return f"{reference or 'optic'}-z{sensor_z_cm:g}cm"
 
 
 @click.group(name="dataset")
@@ -266,6 +318,13 @@ def static(
     help="Registration method: FFT phase correlation, OpenCV ORB features, "
     "or auto (phase correlation with OpenCV fallback).",
 )
+@click.option(
+    "--calibration-dir",
+    default=Path("calibrations"),
+    show_default=True,
+    type=click.Path(file_okay=False, path_type=Path),
+    help="Directory where the exposure calibration for this sweep is saved.",
+)
 def manual(
     camera_settings_path: Path,
     dataset_root: Path,
@@ -277,30 +336,77 @@ def manual(
     metadata: tuple[str, ...],
     do_stitch: bool,
     stitch_method: str,
+    calibration_dir: Path,
 ) -> None:
     """
     Interactive acquisition with a manually operated translation stage.
 
-    Shows a live matplotlib preview of the beam. Press SPACE to save the
-    current frame, move the stage by hand, and save again; press q (or close
-    the window) to finish. Saved frames are then stitched into a composite.
+    Each sweep walks through: (1) optic configuration, (2) sensor z-position
+    and reference optic, (3) interactive exposure calibration saved to
+    --calibration-dir, then (4) the XY scan itself using the calibrated
+    settings. Press SPACE to save the current frame, move the stage by hand,
+    and save again; press q (or close the window) to finish. Saved frames are
+    then stitched into a composite.
     """
 
+    from dataclasses import replace
+
+    from calibration import ExposureCalibrationConfig, calibrate_exposure_interactive
     from dataset_writer import DatasetWriterConfig, FLIRDatasetWriter
     from manual_stage import ManualStageConfig, ManualStageSession
 
-    # 1. Where is the sensor along the beamline right now?
+    # 1. What optics are on the beamline?
+    click.echo("\n--- Step 1/4: optic configuration ---")
+    optic_config = _prompt_optic_configuration()
+
+    # 2. Where is the sensor along the beamline right now?
+    click.echo("\n--- Step 2/4: sensor z-position ---")
     sensor_z_cm = click.prompt(
-        "Camera sensor z-position in cm (e.g. 6.5)",
+        "Camera sensor z-position in cm (e.g. 100.0)",
         type=float,
     )
     sensor_z_reference = click.prompt(
-        "Measured from (e.g. 'front face of axicon #1')",
-        default="axicon #1",
+        "Optic the z-position is measured after (e.g. axicon3)",
+        default="axicon3",
         show_default=True,
     )
 
-    camera_settings = _load_camera_settings_for_software_trigger(camera_settings_path)
+    position_slug = _position_slug(sensor_z_reference, sensor_z_cm)
+
+    # 3. Calibrate exposure at this position, saving the calibrated settings
+    #    (plus PNG/NPY of the final frame) beside previous calibrations.
+    click.echo("\n--- Step 3/4: exposure calibration ---")
+
+    optic_notes = ", ".join(f"{name}={value:g}" for name, value in optic_config.items())
+    base_settings = replace(
+        _load_base_camera_settings(camera_settings_path),
+        Notes=f"z={sensor_z_cm:g}cm after {sensor_z_reference}; {optic_notes}",
+    )
+
+    calibration_dir.mkdir(parents=True, exist_ok=True)
+    calibration_path = calibration_dir / (
+        f"calibrated_camera_settings_{position_slug}_"
+        f"{dt.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.json"
+    )
+
+    calibration_result = calibrate_exposure_interactive(
+        camera_index=camera_index,
+        base_settings=base_settings,
+        output_json_path=calibration_path,
+        config=ExposureCalibrationConfig(
+            AcquisitionTimeout_ms=acquisition_timeout_ms,
+        ),
+    )
+
+    click.echo(f"Calibrated exposure: {calibration_result.FinalExposure_us:.3f} us")
+    click.echo(f"Saved calibration: {calibration_path}")
+
+    # 4. Run the XY scan with the calibrated settings, forcing the software
+    #    triggering that dataset acquisition requires. The position slug goes
+    #    into the placement ID so every frame filename records z + optic.
+    click.echo("\n--- Step 4/4: manual XY scan ---")
+
+    camera_settings = _force_software_trigger(calibration_result.Settings)
 
     config = DatasetWriterConfig(
         JobType=DatasetWriterJobType.MANUAL_SCAN,
@@ -316,16 +422,31 @@ def manual(
 
     run_dir = writer.prepare_run()
 
+    writer.write_json_artifact(
+        "sweep_setup.json",
+        {
+            "OpticConfiguration": optic_config,
+            "SensorZ_cm": sensor_z_cm,
+            "SensorZReference": sensor_z_reference,
+            "ExposureCalibrationPath": str(calibration_path),
+            "CalibratedExposure_us": calibration_result.FinalExposure_us,
+        },
+    )
+
     session = ManualStageSession(
         writer,
         ManualStageConfig(
             SensorZ_mm=sensor_z_cm * 10.0,
             SensorZReference=sensor_z_reference,
-            PlacementID=placement_id,
+            PlacementID=f"{placement_id}-{position_slug}",
             PreviewInterval_s=preview_interval_s,
             AcquisitionTimeout_ms=acquisition_timeout_ms,
             Colormap=colormap,
-            Metadata=_parse_metadata(metadata),
+            Metadata={
+                "OpticConfiguration": optic_config,
+                "ExposureCalibrationPath": str(calibration_path),
+                **_parse_metadata(metadata),
+            },
         ),
     )
 

@@ -30,6 +30,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Optional
+import logging
 
 import numpy as np
 
@@ -37,6 +38,8 @@ from coordinates import ScanPoint, Vec3D
 
 if TYPE_CHECKING:
     from dataset_writer import FLIRDatasetWriter, FrameRecord
+
+logger = logging.getLogger(__name__)
 
 
 SAVE_KEYS = (" ", "space", "s")
@@ -111,6 +114,11 @@ class ManualStageSession:
 
         finally:
             image_result.Release()
+            # A PySpin ImagePtr keeps the camera referenced even after
+            # Release(); if this local survives in the traceback of a
+            # propagating exception, the camera cannot be released at
+            # cleanup (Spinnaker error -1004).
+            image_result = None
 
     # ------------------------------------------------------------------
     # Saving
@@ -202,8 +210,9 @@ class ManualStageSession:
 
             try:
                 fig.canvas.manager.set_window_title("Manual stage dataset mode")
-            except AttributeError:
-                pass  # headless / unusual backends
+            except AttributeError as ex:
+                # headless / unusual backends have no window manager
+                logger.warning(f"Could not set preview window title: {ex}")
 
             fig.canvas.mpl_connect("key_press_event", self._on_key)
 
