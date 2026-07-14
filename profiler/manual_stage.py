@@ -30,6 +30,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Optional
+import logging
 
 import numpy as np
 
@@ -37,6 +38,8 @@ from coordinates import ScanPoint, Vec3D
 
 if TYPE_CHECKING:
     from dataset_writer import FLIRDatasetWriter, FrameRecord
+
+logger = logging.getLogger(__name__)
 
 
 SAVE_KEYS = (" ", "space", "s")
@@ -207,8 +210,9 @@ class ManualStageSession:
 
             try:
                 fig.canvas.manager.set_window_title("Manual stage dataset mode")
-            except AttributeError:
-                pass  # headless / unusual backends
+            except AttributeError as ex:
+                # headless / unusual backends have no window manager
+                logger.warning(f"Could not set preview window title: {ex}")
 
             fig.canvas.mpl_connect("key_press_event", self._on_key)
 
