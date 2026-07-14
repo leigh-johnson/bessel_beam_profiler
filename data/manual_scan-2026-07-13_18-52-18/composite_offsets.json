@@ -1,0 +1,125 @@
+{
+  "OffsetsPx": [
+    {
+      "dy_px": 0.0,
+      "dx_px": 0.0
+    },
+    {
+      "dy_px": 345.6540728616673,
+      "dx_px": -45.28244005368947
+    },
+    {
+      "dy_px": 921.8358804116194,
+      "dx_px": -102.61605908348292
+    },
+    {
+      "dy_px": 906.7343468941294,
+      "dx_px": -256.2137471830938
+    },
+    {
+      "dy_px": 901.3941515203219,
+      "dx_px": -312.08755224897186
+    },
+    {
+      "dy_px": 860.1741408947391,
+      "dx_px": -731.7075419330185
+    },
+    {
+      "dy_px": 320.7700481725327,
+      "dx_px": -673.5288393970224
+    },
+    {
+      "dy_px": -8.338339261495662,
+      "dx_px": -641.2215943634963
+    },
+    {
+      "dy_px": -11.304606515321552,
+      "dx_px": -666.7658016689336
+    }
+  ],
+  "PairwiseShifts": [
+    {
+      "dy_px": 345.6540728616673,
+      "dx_px": -45.28244005368947,
+      "Confidence": 0.017749563131441725,
+      "OverlapNCC": 0.9905323786552508,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 576.181807549952,
+      "dx_px": -57.333619029793454,
+      "Confidence": 0.011322775157250829,
+      "OverlapNCC": 0.9904894486938971,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": -15.101533517489997,
+      "dx_px": -153.59768809961088,
+      "Confidence": 0.01884204401999734,
+      "OverlapNCC": 0.9907377479276733,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": -5.340195373807546,
+      "dx_px": -55.87380506587806,
+      "Confidence": 0.02373957455766526,
+      "OverlapNCC": 0.995198124967972,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": -41.220010625582745,
+      "dx_px": -419.6199896840467,
+      "Confidence": 0.019738494116187746,
+      "OverlapNCC": 0.9908060219511927,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": -539.4040927222064,
+      "dx_px": 58.17870253599622,
+      "Confidence": 0.01792529809860671,
+      "OverlapNCC": 0.9903675265921525,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": -329.1083874340284,
+      "dx_px": 32.30724503352615,
+      "Confidence": 0.027702132426316056,
+      "OverlapNCC": 0.9892026378980099,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": -2.9662672538258903,
+      "dx_px": -25.54420730543734,
+      "Confidence": 0.025753912424016274,
+      "OverlapNCC": 0.9956989129207409,
+      "Method": "PhaseCorrelation"
+    }
+  ],
+  "CompositeShape": [
+    2469,
+    2780
+  ],
+  "Frames": [
+    "data/manual_scan-2026-07-13_18-52-18/manual-stage-axicon3-z70cm-tablezp000700.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0000.npy",
+    "data/manual_scan-2026-07-13_18-52-18/manual-stage-axicon3-z70cm-tablezp000700.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0001.npy",
+    "data/manual_scan-2026-07-13_18-52-18/manual-stage-axicon3-z70cm-tablezp000700.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0002.npy",
+    "data/manual_scan-2026-07-13_18-52-18/manual-stage-axicon3-z70cm-tablezp000700.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0003.npy",
+    "data/manual_scan-2026-07-13_18-52-18/manual-stage-axicon3-z70cm-tablezp000700.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0004.npy",
+    "data/manual_scan-2026-07-13_18-52-18/manual-stage-axicon3-z70cm-tablezp000700.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0005.npy",
+    "data/manual_scan-2026-07-13_18-52-18/manual-stage-axicon3-z70cm-tablezp000700.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0006.npy",
+    "data/manual_scan-2026-07-13_18-52-18/manual-stage-axicon3-z70cm-tablezp000700.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0007.npy",
+    "data/manual_scan-2026-07-13_18-52-18/manual-stage-axicon3-z70cm-tablezp000700.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0008.npy"
+  ],
+  "Config": {
+    "Method": "auto",
+    "MinOverlapNCC": 0.6,
+    "MinOverlap_px": 1024,
+    "MinOverlapFraction": 0.05,
+    "NumPhasePeaks": 5,
+    "NormalizationPercentiles": [
+      0.5,
+      99.8
+    ],
+    "Colormap": "inferno"
+  }
+}
