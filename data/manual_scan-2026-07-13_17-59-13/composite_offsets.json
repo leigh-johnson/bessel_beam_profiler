@@ -1,0 +1,53 @@
+{
+  "OffsetsPx": [
+    {
+      "dy_px": 0.0,
+      "dx_px": 0.0
+    },
+    {
+      "dy_px": -201.68624814294594,
+      "dx_px": 25.256697758770002
+    },
+    {
+      "dy_px": 78.72918977785707,
+      "dx_px": -2.6008035486835013
+    }
+  ],
+  "PairwiseShifts": [
+    {
+      "dy_px": -201.68624814294594,
+      "dx_px": 25.256697758770002,
+      "Confidence": 0.027332546872799644,
+      "OverlapNCC": 0.9900224931148272,
+      "Method": "PhaseCorrelation"
+    },
+    {
+      "dy_px": 280.415437920803,
+      "dx_px": -27.857501307453504,
+      "Confidence": 0.023654619895698045,
+      "OverlapNCC": 0.9844988449573776,
+      "Method": "PhaseCorrelation"
+    }
+  ],
+  "CompositeShape": [
+    1817,
+    2076
+  ],
+  "Frames": [
+    "data/manual_scan-2026-07-13_17-59-13/manual-stage-axicon3-z100cm-tablezp001000.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0000.npy",
+    "data/manual_scan-2026-07-13_17-59-13/manual-stage-axicon3-z100cm-tablezp001000.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0001.npy",
+    "data/manual_scan-2026-07-13_17-59-13/manual-stage-axicon3-z100cm-tablezp001000.000mm-gantryxp000000.000mm-yp000000.000mm-zp000000.000mm-shot0002.npy"
+  ],
+  "Config": {
+    "Method": "auto",
+    "MinOverlapNCC": 0.6,
+    "MinOverlap_px": 1024,
+    "MinOverlapFraction": 0.05,
+    "NumPhasePeaks": 5,
+    "NormalizationPercentiles": [
+      0.5,
+      99.8
+    ],
+    "Colormap": "inferno"
+  }
+}
