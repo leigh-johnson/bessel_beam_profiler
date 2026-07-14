@@ -1,0 +1,14 @@
+{
+  "OpticConfiguration": {
+    "GaussianBeamWaist_mm": 4.59,
+    "Axicon1_deg": 5.0,
+    "Axicon2_deg": 5.0,
+    "Axicon3_deg": 0.5,
+    "L12_mm": 190.0,
+    "L23_mm": 50.0
+  },
+  "SensorZ_cm": 185.0,
+  "SensorZReference": "axicon3",
+  "ExposureCalibrationPath": "calibrations/calibrated_camera_settings_axicon3-z185cm_2026-07-13_18-30-33.json",
+  "CalibratedExposure_us": 31157.97880503484
+}
