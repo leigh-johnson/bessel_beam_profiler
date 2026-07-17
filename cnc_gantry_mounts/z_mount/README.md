@@ -30,16 +30,6 @@ looks across the X axis. The hanging wall sweeps alongside the X-stage
 body — check it clears whatever supports the X-stage ends before running
 full travel.
 
-## Variant 2 — `ZMount_Var2_SideFace`
-
-For the X-carriage plate facing **SIDEWAYS** (normal perpendicular to Z;
-stage on its side, as in your photos). Flat tall plate: bolts to the
-vertical face with **flush** counterbored heads (3.5 mm deep — the rail
-overlaps one screw column), rail clamps beside the pattern, offset 25 mm
-along travel. Camera looks along the plate normal. The rail overhangs the
-carriage ~24 mm toward one end → that much travel lost on that side;
-**mirror the STL in your slicer** to lose it on the other side instead.
-
 ## Assembly
 
 1. Bolt bracket to the X carriage (4× M3×10).
