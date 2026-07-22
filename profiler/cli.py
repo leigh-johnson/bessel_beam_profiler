@@ -7,6 +7,7 @@ from calibration_cli import calibrate
 from dataset_writer_cli import dataset
 from fluidnc_stage_cli import gantry
 from log_utils import configure_cli_logging
+from preflight_cli import preflight
 
 
 @click.group()
@@ -33,6 +34,7 @@ dataset.add_command(auto_scan)
 cli.add_command(dataset)
 cli.add_command(calibrate)
 cli.add_command(gantry)
+cli.add_command(preflight)
 
 
 if __name__ == "__main__":

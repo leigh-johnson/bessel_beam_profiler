@@ -278,9 +278,20 @@ class FluidNCClient:
             logger.info("FluidNC banner: %s", banner)
             self.unsolicited.extend(banner)
 
-        # Known-good modal state for everything we do:
-        # mm units, absolute coords, units-per-minute feed.
-        self.send_command("G21 G90 G94")
+        # Known-good modal state for everything we do: mm units, absolute
+        # coords, units-per-minute feed. On a freshly powered board
+        # (must_home -> Alarm state) G-code is locked out with error:9;
+        # that is fine — home() re-sends the modal line after homing.
+        try:
+            self.send_command("G21 G90 G94")
+        except FluidNCCommandError as ex:
+            if "error:9" in str(ex):
+                logger.info(
+                    "Machine is alarm-locked (not homed yet); modal state "
+                    "will be set after homing."
+                )
+            else:
+                raise
 
     def close(self) -> None:
         self.transport.close()
@@ -389,11 +400,14 @@ class FluidNCClient:
     def home(self, axes: str = "") -> None:
         """
         $H (all axes: Z first, then X+Y auto-square) or $H<axis>.
-        Blocks until homing finishes.
+        Blocks until homing finishes, then (re-)establishes the modal
+        state, which connect() may have been unable to set on an
+        alarm-locked (not-yet-homed) machine.
         """
 
         command = f"$H{axes.upper()}" if axes else "$H"
         self.send_command(command, timeout_s=self.config.HomingTimeout_s)
+        self.send_command("G21 G90 G94")
 
     def move_machine(
         self,
