@@ -64,7 +64,7 @@ def test_prepare_run_writes_settings_and_metadata(dataset_writer_module, tmp_pat
 
     config = dataset_writer_module.DatasetWriterConfig(
         DatasetRoot=tmp_path,
-        RunUUID="unit-test-run",
+        JobType="unit_test",
     )
 
     writer = dataset_writer_module.FLIRDatasetWriter(
@@ -106,7 +106,7 @@ def test_acquire_scan_writes_npy_manifest_and_coordinate_record(
         camera_settings=settings,
         config=dataset_writer_module.DatasetWriterConfig(
             DatasetRoot=tmp_path,
-            RunUUID="unit-test-run",
+            JobType="unit_test",
             AcquisitionTimeout_ms=1234,
         ),
         stage_controller=stage,
@@ -181,7 +181,7 @@ def test_acquire_static_writes_multiple_frames_without_stage_motion(
         camera_settings=settings,
         config=dataset_writer_module.DatasetWriterConfig(
             DatasetRoot=tmp_path,
-            RunUUID="unit-test-static-run",
+            JobType="static",
             AcquisitionTimeout_ms=1234,
         ),
         stage_controller=stage,
@@ -246,7 +246,7 @@ def test_acquire_one_frame_refuses_before_movement_complete(
         camera_index=0,
         cam=cam,
         camera_settings=FakeCameraSettings(),
-        config=dataset_writer_module.DatasetWriterConfig(DatasetRoot=tmp_path),
+        config=dataset_writer_module.DatasetWriterConfig(JobType="unit_test", DatasetRoot=tmp_path),
         stage_controller=FastStageController(),
     )
 
@@ -273,7 +273,7 @@ def test_incomplete_image_releases_and_ends_acquisition(
         camera_index=0,
         cam=cam,
         camera_settings=FakeCameraSettings(),
-        config=dataset_writer_module.DatasetWriterConfig(DatasetRoot=tmp_path),
+        config=dataset_writer_module.DatasetWriterConfig(JobType="unit_test", DatasetRoot=tmp_path),
         stage_controller=FastStageController(),
     )
     writer.signals.MovementComplete.set()
