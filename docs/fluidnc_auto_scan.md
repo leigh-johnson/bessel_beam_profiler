@@ -92,6 +92,15 @@ stopped (`dark`/`cap`), the signal threshold and where it came from, and
   stray scatter reaches the off-axis position). **Validate once**: at the
   highest-exposure (dimmest) slice, compare a corner frame with the beam
   on vs. physically blocked; if they match, the corner is beam-free.
+
+  Cadence: the corner round trip only happens when the calibrated
+  exposure has changed by at least `--background-exposure-change`
+  (default 10%) since the background was last *captured* — cumulative, so
+  slow drift still triggers a refresh; set 0 to capture at every slice.
+  Slices that reuse an earlier background say so in their
+  `background_reference.json` (which background frames apply, their
+  exposure, the change fraction) — analysis should always resolve the
+  background through that file rather than assuming one per folder.
 * `ladder`: once per placement, you block the beam when prompted and a
   log-spaced exposure ladder is captured (default 10 rungs, 25 µs → 100 ms,
   3 shots each) into `background/`. At analysis time subtract the rung
@@ -118,6 +127,8 @@ data/auto_scan-2026-07-22_14-01-05/        # one run dir per placement
         calibrated_camera_settings.json
         raster_metadata.json               # grid, growth history, edge stops,
                                            # threshold, BeamFitsInSingleFrame
+        background_reference.json          # which background frames apply to
+                                           # this slice (captured or reused)
         placement-01-background-...-shot0000.npy      # offaxis mode: the
                                            # slice's exposure-matched background
         placement-01-...-gantryx...y...z...-shot0000.npy  (+ .jpg)

@@ -75,6 +75,16 @@ import click
 )
 @click.option("--background-x", "background_x_mm", default=None, type=float, help="Off-axis background X (machine mm). Default: farthest machine-limit corner.")
 @click.option("--background-y", "background_y_mm", default=None, type=float, help="Off-axis background Y (machine mm). Default: farthest machine-limit corner.")
+@click.option(
+    "--background-exposure-change",
+    default=0.10,
+    show_default=True,
+    type=click.FloatRange(min=0.0),
+    help="Off-axis mode: recapture the background only when the calibrated "
+    "exposure changed by at least this fraction since the last captured "
+    "background (0 = every slice). Skipped slices reuse the previous one, "
+    "recorded in background_reference.json.",
+)
 @click.option("--background-shots", default=3, show_default=True, type=click.IntRange(min=1))
 @click.option("--background-min-us", default=25.0, show_default=True, type=float, help="Ladder mode only.")
 @click.option("--background-max-us", default=100000.0, show_default=True, type=float, help="Ladder mode only.")
@@ -108,6 +118,7 @@ def auto_scan(
     background_mode: str,
     background_x_mm,
     background_y_mm,
+    background_exposure_change: float,
     background_shots: int,
     background_min_us: float,
     background_max_us: float,
@@ -223,6 +234,7 @@ def auto_scan(
                 BackgroundMode=background_mode,
                 BackgroundX_mm=background_x_mm,
                 BackgroundY_mm=background_y_mm,
+                BackgroundExposureChangeFraction=background_exposure_change,
                 BackgroundExposures_us=background_ladder,
                 BackgroundShots=background_shots,
                 Metadata={
@@ -235,11 +247,13 @@ def auto_scan(
             n_xy = len(config.X.values()) * len(config.Y.values())
 
             if background_mode == "offaxis":
-                n_background = n_z * background_shots
+                # Upper bound: slices whose exposure moved < the change
+                # threshold reuse the previous background.
+                n_background = f"up to {n_z * background_shots}"
             elif background_mode == "ladder":
-                n_background = len(background_ladder) * background_shots
+                n_background = str(len(background_ladder) * background_shots)
             else:
-                n_background = 0
+                n_background = "0"
 
             if raster_mode == "adaptive":
                 click.echo(

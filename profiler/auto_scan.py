@@ -106,6 +106,13 @@ class AutoScanConfig:
     # (background mode "ladder" or "none").
     FallbackBackgroundP99_counts: float = 5.0
 
+    # Off-axis mode: recapture the background only when the calibrated
+    # exposure has changed by at least this fraction since the background
+    # was last CAPTURED (cumulative, so slow drift still triggers a
+    # refresh). Slices that reuse an earlier background record it in their
+    # background_reference.json. 0.0 = capture at every slice.
+    BackgroundExposureChangeFraction: float = 0.10
+
     # Where the camera sits during exposure calibration (beam core).
     # None = center of the XY raster.
     CalibrationX_mm: Optional[float] = None
@@ -251,6 +258,10 @@ class AutoScanSession:
         self.records = []
         self.calibrations: dict[str, HeadlessCalibrationResult] = {}
 
+        # Off-axis background reuse state: set whenever a background is
+        # actually captured, consulted before capturing the next one.
+        self._last_background: Optional[dict[str, Any]] = None
+
     # -- motion --------------------------------------------------------
 
     def _move_to(self, x_mm: float, y_mm: float, z_mm: float) -> None:
@@ -331,6 +342,101 @@ class AutoScanSession:
         records = self.writer.acquire_at_current_position(point)
         self.records.extend(records)
         return records
+
+    def background_for_slice(
+        self,
+        machine_z_mm: float,
+        exposure_us: float,
+        machine_limits,
+        z_name: str,
+    ) -> list:
+        """
+        Off-axis background with change-based cadence: capture a fresh
+        background only when the calibrated exposure moved by at least
+        BackgroundExposureChangeFraction since the last captured one;
+        otherwise reuse it. Either way, background_reference.json in the
+        z folder records which background frames apply to this slice.
+        """
+
+        last = self._last_background
+        change = None
+
+        if last is not None and last["Exposure_us"] > 0:
+            change = (
+                abs(exposure_us - last["Exposure_us"]) / last["Exposure_us"]
+            )
+
+        must_capture = (
+            change is None
+            or change >= self.config.BackgroundExposureChangeFraction
+        )
+
+        if must_capture:
+            records = self.capture_background_offaxis(
+                machine_z_mm, exposure_us, machine_limits, z_name
+            )
+
+            self._last_background = {
+                "Exposure_us": exposure_us,
+                "Records": records,
+                "ZName": z_name,
+                "MachineZ_mm": machine_z_mm,
+            }
+
+            bg_x, bg_y = self.background_xy(machine_limits)
+            reason = (
+                "first slice"
+                if change is None
+                else f"exposure changed {change * 100.0:.1f}%"
+            )
+            self.echo(
+                f"    {len(records)} off-axis background frame(s) at "
+                f"X{bg_x:g} Y{bg_y:g} ({reason})"
+            )
+        else:
+            records = last["Records"]
+            self.echo(
+                f"    reusing background from {last['ZName']}/ "
+                f"(exposure changed {change * 100.0:.1f}% < "
+                f"{self.config.BackgroundExposureChangeFraction * 100.0:g}%)"
+            )
+
+        self._write_background_reference(
+            z_name, exposure_us, change, captured=must_capture
+        )
+
+        return records
+
+    def _write_background_reference(
+        self,
+        z_name: str,
+        exposure_us: float,
+        change: Optional[float],
+        captured: bool,
+    ) -> None:
+        last = self._last_background
+
+        z_dir = self.writer.run_dir / z_name
+        z_dir.mkdir(parents=True, exist_ok=True)
+
+        payload = {
+            "Reused": not captured,
+            "SliceExposure_us": exposure_us,
+            "BackgroundExposure_us": last["Exposure_us"],
+            "BackgroundZ": last["ZName"],
+            "BackgroundMachineZ_mm": last["MachineZ_mm"],
+            "ExposureChangeFraction": change,
+            "MaxExposureChangeFraction": (
+                self.config.BackgroundExposureChangeFraction
+            ),
+            "BackgroundPaths": [
+                getattr(record, "Path", None) for record in last["Records"]
+            ],
+        }
+
+        (z_dir / "background_reference.json").write_text(
+            json.dumps(payload, indent=2) + "\n"
+        )
 
     # -- ladder mode: beam-blocked backgrounds, once per placement -----
 
@@ -484,16 +590,11 @@ class AutoScanSession:
             background_records = []
 
             if self.config.BackgroundMode == "offaxis":
-                background_records = self.capture_background_offaxis(
+                background_records = self.background_for_slice(
                     machine_z,
                     calibration.FinalExposure_us,
                     machine_limits,
                     z_name,
-                )
-                bg_x, bg_y = self.background_xy(machine_limits)
-                self.echo(
-                    f"    {len(background_records)} off-axis background "
-                    f"frame(s) at X{bg_x:g} Y{bg_y:g}"
                 )
 
             point_metadata = {

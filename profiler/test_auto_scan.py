@@ -155,6 +155,7 @@ def make_session(
     background_mode="ladder",
     background_x_mm=None,
     background_y_mm=None,
+    background_exposure_change=0.0,  # legacy tests: capture at every slice
     raster_mode="fixed",
     min_signal_pixels=50,
     images=None,
@@ -181,6 +182,7 @@ def make_session(
         BackgroundMode=background_mode,
         BackgroundX_mm=background_x_mm,
         BackgroundY_mm=background_y_mm,
+        BackgroundExposureChangeFraction=background_exposure_change,
         BackgroundExposures_us=(100.0, 1000.0),
         BackgroundShots=1,
     )
@@ -431,6 +433,89 @@ def test_adaptive_raster_single_frame_beam_end_to_end(modules, tmp_path):
         # Seed frame sits at the calibration point (raster center).
         assert record["GantryPosition_mm"]["x_mm"] == 57.5
         assert record["GantryPosition_mm"]["y_mm"] == 80.0
+
+
+def test_background_reused_when_exposure_stable(modules, tmp_path):
+    # Both slices calibrate to the same exposure -> the second slice reuses
+    # the first slice's background instead of driving to the corner again.
+    session, writer, _ = make_session(
+        modules,
+        tmp_path,
+        background_mode="offaxis",
+        background_exposure_change=0.10,
+    )
+    limits = modules.coordinates.Bounds3D(**LIMITS_KW)
+
+    records = session.run(limits)
+
+    manifest = [
+        json.loads(line)
+        for line in (writer.run_dir / "frames.jsonl").read_text().splitlines()
+    ]
+    backgrounds = [r for r in manifest if r["Extra"]["ScanKind"] == "Background"]
+
+    assert len(backgrounds) == 1  # captured for z1 only
+    assert len(records) == 1 + 4  # 1 background + 2 z-slices x 2 XY points
+
+    ref_first = json.loads(
+        (writer.run_dir / "z0100.00cm" / "background_reference.json").read_text()
+    )
+    assert ref_first["Reused"] is False
+    assert ref_first["ExposureChangeFraction"] is None
+    assert ref_first["BackgroundZ"] == "z0100.00cm"
+
+    ref_second = json.loads(
+        (writer.run_dir / "z0101.00cm" / "background_reference.json").read_text()
+    )
+    assert ref_second["Reused"] is True
+    assert ref_second["ExposureChangeFraction"] == 0.0
+    assert ref_second["BackgroundZ"] == "z0100.00cm"
+    assert ref_second["BackgroundExposure_us"] == ref_second["SliceExposure_us"]
+    assert ref_second["BackgroundPaths"] == [backgrounds[0]["Path"]]
+    # The reused background's frames live in the FIRST slice's folder.
+    assert "z0100.00cm" in backgrounds[0]["Path"]
+
+
+def test_background_recaptured_when_exposure_changes(modules, tmp_path):
+    def bright():
+        return FakeImage(np.full((4, 4), 150, dtype=np.uint8))
+
+    def dim():
+        return FakeImage(np.full((4, 4), 5, dtype=np.uint8))
+
+    # z1 calibrates in one frame (exposure stays at the 1000 us seed); z2's
+    # first calibration frame is dim -> exposure jumps 8x -> the >=10%
+    # change forces a fresh background.
+    images = [
+        bright(), bright(), bright(), bright(),   # z1: calib, bg, 2 scans
+        dim(), bright(), bright(), bright(), bright(),  # z2: calib x2, bg, 2 scans
+    ]
+
+    session, writer, _ = make_session(
+        modules,
+        tmp_path,
+        images=images,
+        background_mode="offaxis",
+        background_exposure_change=0.10,
+    )
+    limits = modules.coordinates.Bounds3D(**LIMITS_KW)
+
+    session.run(limits)
+
+    manifest = [
+        json.loads(line)
+        for line in (writer.run_dir / "frames.jsonl").read_text().splitlines()
+    ]
+    backgrounds = [r for r in manifest if r["Extra"]["ScanKind"] == "Background"]
+    assert len(backgrounds) == 2  # one per slice
+
+    ref_second = json.loads(
+        (writer.run_dir / "z0101.00cm" / "background_reference.json").read_text()
+    )
+    assert ref_second["Reused"] is False
+    assert ref_second["ExposureChangeFraction"] == pytest.approx(7.0)
+    assert ref_second["BackgroundZ"] == "z0101.00cm"
+    assert ref_second["BackgroundExposure_us"] == pytest.approx(8000.0)
 
 
 def test_calibration_seeds_next_z_from_previous_exposure(modules, tmp_path):
