@@ -216,14 +216,36 @@ def test_query_status_stores_unsolicited_lines():
     assert "[MSG:INFO: probe]" in client.unsolicited
 
 
-def test_home_uses_long_timeout_command():
+def test_home_homes_then_restores_modal_state():
     client, transport = make_client()
 
     client.home()
-    assert transport.sent[-1] == b"$H\n"
+    assert transport.sent[-2] == b"$H\n"
+    assert transport.sent[-1] == b"G21 G90 G94\n"
 
     client.home("z")
-    assert transport.sent[-1] == b"$HZ\n"
+    assert transport.sent[-2] == b"$HZ\n"
+
+
+def test_connect_tolerates_alarm_locked_modal_state():
+    client, transport = make_client()
+    # must_home boot: G-code is locked out until $H.
+    transport.responses["G21 G90 G94"] = ["error:9"]
+
+    client.connect()  # must not raise
+
+    # Homing clears the alarm; the modal line goes through afterwards.
+    transport.responses["G21 G90 G94"] = ["ok"]
+    client.home()
+    assert transport.sent[-1] == b"G21 G90 G94\n"
+
+
+def test_connect_still_raises_on_other_modal_errors():
+    client, transport = make_client()
+    transport.responses["G21 G90 G94"] = ["error:20"]
+
+    with pytest.raises(FluidNCCommandError, match="error:20"):
+        client.connect()
 
 
 # ---------------------------------------------------------------------------
