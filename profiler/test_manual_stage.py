@@ -39,7 +39,7 @@ def make_writer(dataset_writer, tmp_path, images):
         camera_settings=FakeCameraSettings(),
         config=dataset_writer.DatasetWriterConfig(
             DatasetRoot=tmp_path,
-            RunUUID="manual-test-run",
+            JobType="manual_scan",
         ),
     )
     writer.prepare_run()
