@@ -12,8 +12,13 @@ one run directory per gantry placement.
 from __future__ import annotations
 
 from pathlib import Path
+import logging
 
 import click
+
+from log_utils import add_file_log, remove_file_log
+
+logger = logging.getLogger(__name__)
 
 
 @click.command("auto")
@@ -288,18 +293,25 @@ def auto_scan(
             )
 
             run_dir = writer.prepare_run()
-            click.echo(f"Run directory: {run_dir}")
 
             session = AutoScanSession(
                 writer,
                 config,
                 pause_fn=lambda message: click.pause(f"\n>>> {message}\nPress any key when ready..."),
-                echo_fn=click.echo,
             )
 
-            records = session.run(stage.config.MachineLimits_mm)
+            # Everything logged during this placement (any module) also
+            # lands in a scan.log next to the data.
+            log_handler = add_file_log(run_dir / "scan.log")
+            logger.info(f"Run directory: {run_dir}")
 
-            click.echo(f"\nPlacement done: {len(records)} frames in {run_dir}")
+            try:
+                records = session.run(stage.config.MachineLimits_mm)
+                logger.info(
+                    f"Placement done: {len(records)} frames in {run_dir}"
+                )
+            finally:
+                remove_file_log(log_handler)
 
             # Release the camera before the next placement (PySpin cleanup).
             del session

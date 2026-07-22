@@ -7,6 +7,7 @@ cell that would contain signal gets captured) independent of hardware.
 No PySpin involvement anywhere.
 """
 
+import logging
 import types
 
 import numpy as np
@@ -78,11 +79,9 @@ def make_config(**overrides):
     return AdaptiveRasterConfig(**defaults)
 
 
-def run_raster(beam_center, beam_radius_mm, echo=None, **config_overrides):
+def run_raster(beam_center, beam_radius_mm, **config_overrides):
     camera = SyntheticCamera(beam_center, beam_radius_mm)
-    runner = AdaptiveRasterRunner(
-        make_config(**config_overrides), camera, echo_fn=echo
-    )
+    runner = AdaptiveRasterRunner(make_config(**config_overrides), camera)
     return runner.run(), camera
 
 
@@ -117,9 +116,9 @@ def lattice_cells_with_signal(config, beam_center, beam_radius_mm):
 # ---------------------------------------------------------------------------
 
 
-def test_beam_fitting_in_one_frame_takes_exactly_one_frame():
-    echoes = []
-    result, camera = run_raster(CENTER, beam_radius_mm=1.5, echo=echoes.append)
+def test_beam_fitting_in_one_frame_takes_exactly_one_frame(caplog):
+    with caplog.at_level(logging.INFO, logger="adaptive_raster"):
+        result, camera = run_raster(CENTER, beam_radius_mm=1.5)
 
     assert len(camera.captured) == 1
     assert camera.captured[0] == (CENTER[0], CENTER[1], 0, 0)
@@ -130,7 +129,7 @@ def test_beam_fitting_in_one_frame_takes_exactly_one_frame():
     assert meta["GridShape"] == [1, 1]
     assert meta["EdgeStops"] == {s: "dark" for s in ("+x", "-x", "+y", "-y")}
     assert meta["TruncatedSides"] == []
-    assert any("single camera frame" in message for message in echoes)
+    assert any("single camera frame" in record.message for record in caplog.records)
 
 
 def test_medium_beam_grows_until_edges_dark_and_covers_all_signal_cells():
@@ -167,9 +166,9 @@ def test_off_center_beam_grows_asymmetrically_with_coverage():
     assert rect["XMax"] - CENTER[0] > CENTER[0] - rect["XMin"]
 
 
-def test_huge_beam_stops_at_cap_and_reports_truncation():
-    echoes = []
-    result, camera = run_raster(CENTER, beam_radius_mm=100.0, echo=echoes.append)
+def test_huge_beam_stops_at_cap_and_reports_truncation(caplog):
+    with caplog.at_level(logging.WARNING, logger="adaptive_raster"):
+        result, camera = run_raster(CENTER, beam_radius_mm=100.0)
 
     meta = result.Metadata
     assert sorted(meta["TruncatedSides"]) == ["+x", "+y", "-x", "-y"] or set(
@@ -179,7 +178,7 @@ def test_huge_beam_stops_at_cap_and_reports_truncation():
     # Grew to exactly the full capped lattice (9 x 9).
     assert meta["GridShape"] == [9, 9]
     assert meta["CellsCaptured"] == meta["FixedGridCells"] == 81
-    assert any("TRUNCATED" in message for message in echoes)
+    assert any("TRUNCATED" in record.message for record in caplog.records)
 
 
 def test_each_cell_captured_exactly_once():
@@ -205,11 +204,11 @@ def test_metadata_records_cells_and_threshold():
     assert set(cell["BorderSignal"]) == {"+x", "-x", "+y", "-y"}
 
 
-def test_warns_when_min_signal_pixels_exceeds_strip_size():
-    echoes = []
-    run_raster(CENTER, beam_radius_mm=6.0, echo=echoes.append, MinSignalPixels=10_000)
+def test_warns_when_min_signal_pixels_exceeds_strip_size(caplog):
+    with caplog.at_level(logging.WARNING, logger="adaptive_raster"):
+        run_raster(CENTER, beam_radius_mm=6.0, MinSignalPixels=10_000)
 
-    assert any("NEVER grow" in message for message in echoes)
+    assert any("NEVER grow" in record.message for record in caplog.records)
 
 
 def test_rejects_unknown_border_test_mode():

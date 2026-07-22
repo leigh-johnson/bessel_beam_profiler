@@ -134,6 +134,8 @@ data/auto_scan-2026-07-22_14-01-05/        # one run dir per placement
         placement-01-...-gantryx...y...z...-shot0000.npy  (+ .jpg)
     z0101.00cm/
         ...
+    scan.log                               # timestamped log of the placement
+                                           # (also shown on the console)
 ```
 
 Every frame's manifest record carries `Exposure_us`, `MachineZ_mm`,
@@ -143,6 +145,18 @@ Every frame's manifest record carries `Exposure_us`, `MachineZ_mm`,
 mode, subtraction is trivial: each z folder contains its own
 exposure-matched background. In ladder mode, pick the rung nearest each
 frame's exposure or interpolate (background is ~linear in exposure).
+
+## Logging
+
+The CLI configures Python logging at INFO by default (`--log-level` on the
+top-level `cli` group changes it). All scan progress — slice headers,
+calibration results, background capture/reuse decisions, adaptive-raster
+growth and truncation warnings — goes through `logging`, so the dataset
+subcommands (`auto`, `static`, `manual`, `stitch`) mirror everything into
+a timestamped `scan.log` inside the run directory, next to the data it
+describes. For `dataset auto`, each placement's run directory gets its own
+scan.log (the handler swaps when a new placement starts). Interactive
+prompts and plan confirmations remain plain console output.
 
 ## Defaults worth knowing
 

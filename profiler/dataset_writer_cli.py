@@ -6,6 +6,7 @@ import re
 
 import click
 from dataset_writer import DatasetWriterJobType
+from log_utils import add_file_log
 
 # Default optic configuration for the Bessel-beam line, prompted for at the
 # start of every manual XY sweep.
@@ -224,6 +225,10 @@ def static(
 
     run_dir = writer.prepare_run()
 
+    # Mirror the log into the run directory (process exits after this
+    # command, so the handler is not detached explicitly).
+    add_file_log(run_dir / "scan.log")
+
     records = writer.acquire_static(
         nshots=nshots,
         placement_id=placement_id,
@@ -422,6 +427,10 @@ def manual(
 
     run_dir = writer.prepare_run()
 
+    # Mirror the log into the run directory (process exits after this
+    # command, so the handler is not detached explicitly).
+    add_file_log(run_dir / "scan.log")
+
     writer.write_json_artifact(
         "sweep_setup.json",
         {
@@ -524,6 +533,8 @@ def stitch(run_dir: Path, method: str, output_stem: str, colormap: str) -> None:
     """
 
     from stitcher import StitchConfig, stitch_run_dir
+
+    add_file_log(run_dir / "scan.log")
 
     outputs = stitch_run_dir(
         run_dir,
