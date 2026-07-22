@@ -31,6 +31,7 @@ import logging
 
 import numpy as np
 
+from adaptive_raster import AdaptiveRasterConfig, AdaptiveRasterRunner
 from coordinates import (
     AxisRange,
     Bounds2D,
@@ -74,9 +75,36 @@ class AutoScanConfig:
     ZStop_machine_mm: float = -5.0
     ZStep_mm: float = 10.0
 
-    # XY raster (machine coordinates) captured at every Z.
+    # XY raster (machine coordinates) captured at every Z. In adaptive
+    # raster mode these are the CAPS (maximum extent), not the fixed grid.
     X: AxisRange = AxisRange(start_mm=45.0, stop_mm=75.0, step_mm=5.0)
     Y: AxisRange = AxisRange(start_mm=65.0, stop_mm=95.0, step_mm=4.0)
+
+    # "adaptive": start from one seed frame at the calibration point and
+    #   grow the rectangle only while its edge frames still contain signal
+    #   (background-referenced). If the beam fits in one camera frame, the
+    #   slice completes after a single position.
+    # "fixed": raster the full X x Y grid at every slice.
+    RasterMode: str = "adaptive"
+
+    # Adaptive-raster signal test: a border strip "has signal" when at
+    # least MinSignalPixels exceed (background p99 + SignalMargin_counts).
+    SignalMargin_counts: float = 8.0
+    MinSignalPixels: int = 50
+    BorderStripFraction: float = 0.15
+
+    # "any" = orientation-independent border test (default, safe;
+    # overshoots the beam extent by <= ~1 frame per side). "directional"
+    # tests only the outward-facing strip and needs the image->machine axis
+    # mapping below verified once on hardware.
+    BorderTest: str = "any"
+    ImageTranspose: bool = False
+    ImageFlipX: bool = False
+    ImageFlipY: bool = False
+
+    # Signal threshold fallback when no per-slice background exists
+    # (background mode "ladder" or "none").
+    FallbackBackgroundP99_counts: float = 5.0
 
     # Where the camera sits during exposure calibration (beam core).
     # None = center of the XY raster.
@@ -453,6 +481,8 @@ class AutoScanSession:
                 f"converged={calibration.Converged})"
             )
 
+            background_records = []
+
             if self.config.BackgroundMode == "offaxis":
                 background_records = self.capture_background_offaxis(
                     machine_z,
@@ -466,32 +496,173 @@ class AutoScanSession:
                     f"frame(s) at X{bg_x:g} Y{bg_y:g}"
                 )
 
-            plan = XYCrossSectionPlan(
-                Placement=self.placement,
-                MachineLimits=machine_limits,
-                ROI=roi,
-                GantryZ_mm=machine_z,
-                X=self.config.X,
-                Y=self.config.Y,
-                NShots=self.config.NShots,
-                Metadata={
-                    "ScanKind": "AutoZStack",
-                    "Subfolder": z_name,
-                    "MachineZ_mm": machine_z,
-                    "TableZ_mm": table_z_mm,
-                    "SensorZReference": self.config.SensorZReference,
-                    "Exposure_us": calibration.FinalExposure_us,
-                    **self.config.Metadata,
-                },
-            )
+            point_metadata = {
+                "ScanKind": "AutoZStack",
+                "Subfolder": z_name,
+                "MachineZ_mm": machine_z,
+                "TableZ_mm": table_z_mm,
+                "SensorZReference": self.config.SensorZReference,
+                "Exposure_us": calibration.FinalExposure_us,
+                **self.config.Metadata,
+            }
 
-            points = plan.generate_points()
-            records = self.writer.acquire_scan(points)
+            if self.config.RasterMode == "adaptive":
+                records, raster_metadata = self._run_adaptive_raster(
+                    machine_z,
+                    machine_limits,
+                    background_records,
+                    point_metadata,
+                )
+            else:
+                plan = XYCrossSectionPlan(
+                    Placement=self.placement,
+                    MachineLimits=machine_limits,
+                    ROI=roi,
+                    GantryZ_mm=machine_z,
+                    X=self.config.X,
+                    Y=self.config.Y,
+                    NShots=self.config.NShots,
+                    Metadata=point_metadata,
+                )
+
+                points = plan.generate_points()
+                records = self.writer.acquire_scan(points)
+
+                raster_metadata = {
+                    "RasterMode": "fixed",
+                    "Step_mm": [self.config.X.step_mm, self.config.Y.step_mm],
+                    "GridShape": [
+                        len(self.config.X.values()),
+                        len(self.config.Y.values()),
+                    ],
+                    "FinalRect_mm": {
+                        "XMin": self.config.X.start_mm,
+                        "XMax": self.config.X.stop_mm,
+                        "YMin": self.config.Y.start_mm,
+                        "YMax": self.config.Y.stop_mm,
+                    },
+                    "CellsCaptured": len(points),
+                }
+
             self.records.extend(records)
+            self._write_raster_metadata(z_name, machine_z, raster_metadata)
 
             self.echo(f"    {len(records)} frames -> {z_name}/")
 
         return self.records
+
+    # -- adaptive raster ------------------------------------------------
+
+    def signal_threshold(self, background_records) -> tuple[float, str]:
+        """
+        Counts threshold for "this frame contains beam signal": the p99 of
+        this slice's own off-axis background frames plus a margin, falling
+        back to a configured constant when no background is available.
+        """
+
+        if background_records:
+            arrays = [np.load(record.Path) for record in background_records]
+            p99 = float(np.percentile(np.stack(arrays), 99))
+            threshold = p99 + self.config.SignalMargin_counts
+            source = (
+                f"offaxis-background-p99({p99:.2f})"
+                f"+margin({self.config.SignalMargin_counts:g})"
+            )
+            return threshold, source
+
+        threshold = (
+            self.config.FallbackBackgroundP99_counts
+            + self.config.SignalMargin_counts
+        )
+        source = (
+            f"fallback({self.config.FallbackBackgroundP99_counts:g})"
+            f"+margin({self.config.SignalMargin_counts:g}) "
+            "— no per-slice background available"
+        )
+        return threshold, source
+
+    def _run_adaptive_raster(
+        self,
+        machine_z_mm: float,
+        machine_limits,
+        background_records,
+        point_metadata: dict,
+    ) -> tuple[list, dict]:
+        threshold, threshold_source = self.signal_threshold(background_records)
+        calib_x, calib_y = self.config.calibration_xy()
+
+        # Caps: the configured X/Y ranges, further clamped to machine limits.
+        x_min = max(self.config.X.start_mm, machine_limits.x_min_mm)
+        x_max = min(self.config.X.stop_mm, machine_limits.x_max_mm)
+        y_min = max(self.config.Y.start_mm, machine_limits.y_min_mm)
+        y_max = min(self.config.Y.stop_mm, machine_limits.y_max_mm)
+
+        raster_config = AdaptiveRasterConfig(
+            CenterX_mm=calib_x,
+            CenterY_mm=calib_y,
+            StepX_mm=self.config.X.step_mm,
+            StepY_mm=self.config.Y.step_mm,
+            XMin_mm=x_min,
+            XMax_mm=x_max,
+            YMin_mm=y_min,
+            YMax_mm=y_max,
+            SignalThreshold_counts=threshold,
+            MinSignalPixels=self.config.MinSignalPixels,
+            BorderStripFraction=self.config.BorderStripFraction,
+            BorderTest=self.config.BorderTest,
+            ImageTranspose=self.config.ImageTranspose,
+            ImageFlipX=self.config.ImageFlipX,
+            ImageFlipY=self.config.ImageFlipY,
+        )
+
+        def capture(x_mm: float, y_mm: float, i: int, j: int):
+            point = ScanPoint(
+                PlacementID=self.placement.PlacementID,
+                GantryPosition_mm=Vec3D(x_mm, y_mm, machine_z_mm),
+                TablePosition_mm=self.placement.gantry_to_table(
+                    Vec3D(x_mm, y_mm, machine_z_mm)
+                ),
+                NShots=self.config.NShots,
+                Metadata={**point_metadata, "GridI": i, "GridJ": j},
+            )
+
+            records = self.writer.acquire_scan([point])
+            arr = np.load(records[0].Path)
+            return records, arr
+
+        runner = AdaptiveRasterRunner(
+            raster_config,
+            capture,
+            echo_fn=lambda message: self.echo(f"    {message}"),
+        )
+        result = runner.run()
+
+        metadata = result.Metadata
+        metadata["SignalThresholdSource"] = threshold_source
+
+        self.echo(
+            f"    adaptive raster: {metadata['CellsCaptured']} cells "
+            f"(grid {metadata['GridShape'][0]}x{metadata['GridShape'][1]}) "
+            f"vs {metadata['FixedGridCells']} for the full fixed grid"
+        )
+
+        return result.Records, metadata
+
+    def _write_raster_metadata(
+        self, z_name: str, machine_z_mm: float, metadata: dict
+    ) -> None:
+        z_dir = self.writer.run_dir / z_name
+        z_dir.mkdir(parents=True, exist_ok=True)
+
+        payload = {
+            "MachineZ_mm": machine_z_mm,
+            "TableZ_mm": self.config.table_z_mm(machine_z_mm),
+            **metadata,
+        }
+
+        (z_dir / "raster_metadata.json").write_text(
+            json.dumps(payload, indent=2) + "\n"
+        )
 
     # -- everything ----------------------------------------------------
 

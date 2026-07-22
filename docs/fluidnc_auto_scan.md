@@ -57,6 +57,30 @@ Workflow per placement (repeats for as many placements as you want):
 4. At the end you can move the gantry to a new placement; it re-homes and
    asks for a fresh distance measurement, and a new run directory begins.
 
+### Raster modes (`--raster`)
+
+* `adaptive` (default): each slice starts with ONE seed frame at the
+  calibration point, then the rectangle grows one grid step at a time in
+  any direction whose edge frames still show signal in their border
+  strips, referenced to this slice's own off-axis background
+  (p99 + `--signal-margin` counts, at least `--min-signal-pixels` pixels).
+  It stops when all four edges are dark — or at the `--x/--y` ranges,
+  which act as the CAP; a cap stop is logged loudly and recorded as
+  `TruncatedSides` in the metadata, because it means the beam was cut off.
+  **A beam that fits inside one camera frame takes exactly one frame**
+  (all four border strips of the seed frame are dark). The default border
+  test (`any`) is orientation-independent and may overshoot the beam
+  extent by ~1 frame per side; once you've verified how image axes map to
+  machine axes, `BorderTest="directional"` in `AutoScanConfig` (with
+  `ImageTranspose`/`ImageFlipX`/`ImageFlipY`) removes the overshoot.
+* `fixed`: always raster the full X x Y grid (the pre-adaptive behavior).
+
+Every z folder gets a `raster_metadata.json` in either mode: the grid,
+final rectangle, cells captured vs. the full-grid count, per-cell border
+signal flags and file paths, growth history per pass, why each edge
+stopped (`dark`/`cap`), the signal threshold and where it came from, and
+`BeamFitsInSingleFrame`.
+
 ### Background modes (`--background-mode`)
 
 * `offaxis` (default): at each Z, right after calibration, the camera
@@ -92,6 +116,8 @@ data/auto_scan-2026-07-22_14-01-05/        # one run dir per placement
         frames.jsonl                       # per-z manifest (stitchable)
         calibration_result.json            # exposure, max, converged
         calibrated_camera_settings.json
+        raster_metadata.json               # grid, growth history, edge stops,
+                                           # threshold, BeamFitsInSingleFrame
         placement-01-background-...-shot0000.npy      # offaxis mode: the
                                            # slice's exposure-matched background
         placement-01-...-gantryx...y...z...-shot0000.npy  (+ .jpg)

@@ -155,11 +155,16 @@ def make_session(
     background_mode="ladder",
     background_x_mm=None,
     background_y_mm=None,
+    raster_mode="fixed",
+    min_signal_pixels=50,
+    images=None,
 ):
-    # Mid-brightness frames: instantly inside the calibration window.
-    images = [
-        FakeImage(np.full((4, 4), 150, dtype=np.uint8)) for _ in range(n_images)
-    ]
+    if images is None:
+        # Mid-brightness frames: instantly inside the calibration window.
+        images = [
+            FakeImage(np.full((4, 4), 150, dtype=np.uint8))
+            for _ in range(n_images)
+        ]
     writer = make_writer(modules, tmp_path, images=images)
 
     config = modules.auto_scan.AutoScanConfig(
@@ -171,6 +176,8 @@ def make_session(
         X=modules.coordinates.AxisRange(start_mm=55.0, stop_mm=60.0, step_mm=5.0),
         Y=modules.coordinates.AxisRange(start_mm=80.0, stop_mm=80.0, step_mm=5.0),
         NShots=1,
+        RasterMode=raster_mode,
+        MinSignalPixels=min_signal_pixels,
         BackgroundMode=background_mode,
         BackgroundX_mm=background_x_mm,
         BackgroundY_mm=background_y_mm,
@@ -345,6 +352,85 @@ def test_background_mode_none_skips_all_backgrounds(modules, tmp_path):
         for line in (writer.run_dir / "frames.jsonl").read_text().splitlines()
     ]
     assert all(r["Extra"]["ScanKind"] == "AutoZStack" for r in manifest)
+
+
+def test_fixed_raster_writes_raster_metadata(modules, tmp_path):
+    session, writer, _ = make_session(modules, tmp_path, background_mode="none")
+    limits = modules.coordinates.Bounds3D(**LIMITS_KW)
+
+    session.run(limits)
+
+    meta = json.loads(
+        (writer.run_dir / "z0100.00cm" / "raster_metadata.json").read_text()
+    )
+    assert meta["RasterMode"] == "fixed"
+    assert meta["GridShape"] == [2, 1]
+    assert meta["CellsCaptured"] == 2
+    assert meta["MachineZ_mm"] == -20.0
+    assert meta["TableZ_mm"] == 1000.0
+
+
+def test_adaptive_raster_single_frame_beam_end_to_end(modules, tmp_path):
+    # Per z: 1 calibration frame, 1 background frame, then the seed raster
+    # frame whose beam blob sits in the frame center (dark borders) -> the
+    # slice completes after ONE raster position.
+    def blob_frame():
+        arr = np.full((12, 16), 2, dtype=np.uint8)
+        arr[4:8, 6:10] = 150
+        return FakeImage(arr)
+
+    def calibration_frame():
+        return FakeImage(np.full((12, 16), 150, dtype=np.uint8))
+
+    def dark_frame():
+        return FakeImage(np.full((12, 16), 2, dtype=np.uint8))
+
+    images = []
+    for _ in range(2):  # two z-slices
+        images.extend([calibration_frame(), dark_frame(), blob_frame()])
+
+    session, writer, _ = make_session(
+        modules,
+        tmp_path,
+        images=images,
+        background_mode="offaxis",
+        raster_mode="adaptive",
+        min_signal_pixels=4,
+    )
+    limits = modules.coordinates.Bounds3D(**LIMITS_KW)
+
+    records = session.run(limits)
+
+    # Per z: 1 background + 1 raster frame. All queued images consumed.
+    assert len(records) == 4
+
+    for z_name in ("z0100.00cm", "z0101.00cm"):
+        meta = json.loads(
+            (writer.run_dir / z_name / "raster_metadata.json").read_text()
+        )
+        assert meta["RasterMode"] == "adaptive"
+        assert meta["BeamFitsInSingleFrame"] is True
+        assert meta["CellsCaptured"] == 1
+        assert meta["GridShape"] == [1, 1]
+        assert meta["TruncatedSides"] == []
+        # Threshold came from this slice's own off-axis background:
+        # p99(2) + margin(8) = 10.
+        assert meta["SignalThreshold_counts"] == 10.0
+        assert "offaxis-background" in meta["SignalThresholdSource"]
+        assert meta["Cells"][0]["AnySignal"] is True
+
+    manifest = [
+        json.loads(line)
+        for line in (writer.run_dir / "frames.jsonl").read_text().splitlines()
+    ]
+    scans = [r for r in manifest if r["Extra"]["ScanKind"] == "AutoZStack"]
+    assert len(scans) == 2
+    for record in scans:
+        assert record["Extra"]["GridI"] == 0
+        assert record["Extra"]["GridJ"] == 0
+        # Seed frame sits at the calibration point (raster center).
+        assert record["GantryPosition_mm"]["x_mm"] == 57.5
+        assert record["GantryPosition_mm"]["y_mm"] == 80.0
 
 
 def test_calibration_seeds_next_z_from_previous_exposure(modules, tmp_path):

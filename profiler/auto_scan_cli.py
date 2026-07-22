@@ -41,12 +41,24 @@ import click
     help="Root directory; one timestamped run directory is created per placement.",
 )
 # -- XY raster --------------------------------------------------------------
+@click.option(
+    "--raster",
+    "raster_mode",
+    default="adaptive",
+    show_default=True,
+    type=click.Choice(["adaptive", "fixed"]),
+    help="adaptive: grow the raster from one seed frame until its edges are "
+    "dark (x/y ranges act as the CAP; a beam that fits in one frame takes "
+    "one frame). fixed: always raster the full x/y grid.",
+)
 @click.option("--x-min", default=45.0, show_default=True, type=float)
 @click.option("--x-max", default=75.0, show_default=True, type=float)
 @click.option("--x-step", default=5.0, show_default=True, type=float, help="~30% overlap for the 7.1 mm-wide sensor.")
 @click.option("--y-min", default=65.0, show_default=True, type=float)
 @click.option("--y-max", default=95.0, show_default=True, type=float)
 @click.option("--y-step", default=4.0, show_default=True, type=float, help="~25% overlap for the 5.3 mm-tall sensor.")
+@click.option("--signal-margin", default=8.0, show_default=True, type=float, help="Adaptive: counts above the background p99 that count as beam signal.")
+@click.option("--min-signal-pixels", default=50, show_default=True, type=click.IntRange(min=1), help="Adaptive: pixels above threshold needed to call a border strip 'signal'.")
 # -- Z stack (machine coordinates: negative, -120 near optics .. -2 top) ----
 @click.option("--z-start", default=-120.0, show_default=True, type=float, help="Machine Z of the FIRST (closest to optic) slice.")
 @click.option("--z-stop", default=-5.0, show_default=True, type=float, help="Machine Z to scan up to.")
@@ -81,12 +93,15 @@ def auto_scan(
     nshots: int,
     settle_time_s: float,
     dataset_root: Path,
+    raster_mode: str,
     x_min: float,
     x_max: float,
     x_step: float,
     y_min: float,
     y_max: float,
     y_step: float,
+    signal_margin: float,
+    min_signal_pixels: int,
     z_start: float,
     z_stop: float,
     z_step: float,
@@ -201,6 +216,9 @@ def auto_scan(
                 ZStep_mm=z_step,
                 X=AxisRange(start_mm=x_min, stop_mm=x_max, step_mm=x_step),
                 Y=AxisRange(start_mm=y_min, stop_mm=y_max, step_mm=y_step),
+                RasterMode=raster_mode,
+                SignalMargin_counts=signal_margin,
+                MinSignalPixels=min_signal_pixels,
                 NShots=nshots,
                 BackgroundMode=background_mode,
                 BackgroundX_mm=background_x_mm,
@@ -223,11 +241,20 @@ def auto_scan(
             else:
                 n_background = 0
 
-            click.echo(
-                f"\nPlan: {n_z} z-slices x {n_xy} XY points x {nshots} shot(s) "
-                f"= {n_z * n_xy * nshots} frames "
-                f"(+ {n_background} background frames, mode={background_mode})."
-            )
+            if raster_mode == "adaptive":
+                click.echo(
+                    f"\nPlan: {n_z} z-slices, adaptive raster capped at "
+                    f"{n_xy} XY points x {nshots} shot(s) per slice "
+                    f"(up to {n_z * n_xy * nshots} frames; typically far "
+                    f"fewer; + {n_background} background frames, "
+                    f"mode={background_mode})."
+                )
+            else:
+                click.echo(
+                    f"\nPlan: {n_z} z-slices x {n_xy} XY points x {nshots} "
+                    f"shot(s) = {n_z * n_xy * nshots} frames "
+                    f"(+ {n_background} background frames, mode={background_mode})."
+                )
             click.confirm("Start this placement's scan?", abort=True)
 
             camera_settings = _load_camera_settings_for_software_trigger(
