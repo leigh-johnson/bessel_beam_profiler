@@ -40,9 +40,11 @@ class DatasetWriterConfig:
     # We can encode to BMP or PNG later, but want to avoid any lossy compression at this stage.
     ImageExtension: str = ".npy"
 
-    # Group frames into per-z subfolders of the run directory (named from
-    # TablePosition_mm.z_mm) when no explicit Metadata["Subfolder"] is set.
-    GroupByZSubfolder: bool = False
+    # Group frames into per-slice subfolders of the run directory (named
+    # from TablePosition_mm.y_mm, the distance along the beam) when no
+    # explicit Metadata["Subfolder"] is set. Coordinate convention:
+    # X horizontal transverse, Y beam propagation, Z vertical.
+    GroupByYSubfolder: bool = False
 
     def make_run_dir(self) -> Path:
         now = dt.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
@@ -491,7 +493,9 @@ class FLIRDatasetWriter(FLIRCameraControllerBase):
         filename = (
             f"{_format_placement_id(point.PlacementID)}-"
             f"{tag_part}"
-            f"tablez{_format_mm(point.TablePosition_mm.z_mm)}-"
+            # TablePosition y = distance along the beam from the reference
+            # optic (X horizontal transverse, Y propagation, Z vertical).
+            f"tabley{_format_mm(point.TablePosition_mm.y_mm)}-"
             f"gantry{_format_vec3(point.GantryPosition_mm)}-"
             f"shot{shot_idx:04d}"
             f"{self.config.ImageExtension}"
@@ -507,15 +511,17 @@ class FLIRDatasetWriter(FLIRCameraControllerBase):
         directory when either:
 
             * point.Metadata["Subfolder"] names one explicitly (used by the
-              auto scan for z-position folders and the background ladder), or
-            * config.GroupByZSubfolder is set, in which case the table
-              z-position is used, e.g. "z_p0001000.000mm/".
+              auto scan for beam-position folders and the background
+              ladder), or
+            * config.GroupByYSubfolder is set, in which case the table
+              y-position (distance along the beam) is used,
+              e.g. "y_p001000.000mm/".
         """
 
         name = (point.Metadata or {}).get("Subfolder")
 
-        if not name and self.config.GroupByZSubfolder:
-            name = f"z_{_format_mm(point.TablePosition_mm.z_mm)}"
+        if not name and self.config.GroupByYSubfolder:
+            name = f"y_{_format_mm(point.TablePosition_mm.y_mm)}"
 
         if not name:
             return self.run_dir
