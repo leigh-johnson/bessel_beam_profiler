@@ -85,8 +85,29 @@ class AutoScanConfig:
 
     NShots: int = 1
 
-    # Background ladder (beam blocked), once per placement.
+    # How beam-off/ambient backgrounds are captured:
+    #
+    #   "offaxis" (default): at each Z, right after exposure calibration,
+    #       the camera moves to an XY position outside the beam and captures
+    #       backgrounds at that slice's calibrated exposure — exact exposure
+    #       match, per-slice drift tracking, no manual beam blocking.
+    #       Captures ambient light only (plus any stray scatter reaching the
+    #       off-axis position); validate once on hardware that the position
+    #       is beam-free at the highest exposure in the stack.
+    #   "ladder": once per placement, you block the beam when prompted and a
+    #       log-spaced exposure ladder is captured (subtract the nearest /
+    #       interpolated rung at analysis time).
+    #   "none": no backgrounds (quick alignment runs).
+    BackgroundMode: str = "offaxis"
+
+    # Off-axis background position (machine coords). None = automatically
+    # use the machine-limit corner farthest from the calibration point.
+    BackgroundX_mm: Optional[float] = None
+    BackgroundY_mm: Optional[float] = None
+
+    # Ladder mode only: exposures for the beam-blocked ladder.
     BackgroundExposures_us: tuple[float, ...] = ()
+
     BackgroundShots: int = 3
 
     Metadata: dict[str, Any] = field(default_factory=dict)
@@ -214,7 +235,76 @@ class AutoScanSession:
         )
         self.writer._move_and_wait(point)
 
-    # -- step 2: background ladder ------------------------------------
+    # -- backgrounds ----------------------------------------------------
+
+    def background_xy(self, machine_limits) -> tuple[float, float]:
+        """
+        Off-axis background position: explicit config values if given,
+        otherwise the machine-limit corner farthest from the calibration
+        point (i.e. as far from the beam as this placement allows).
+        """
+
+        if (
+            self.config.BackgroundX_mm is not None
+            and self.config.BackgroundY_mm is not None
+        ):
+            return self.config.BackgroundX_mm, self.config.BackgroundY_mm
+
+        calib_x, calib_y = self.config.calibration_xy()
+
+        corners = [
+            (machine_limits.x_min_mm, machine_limits.y_min_mm),
+            (machine_limits.x_min_mm, machine_limits.y_max_mm),
+            (machine_limits.x_max_mm, machine_limits.y_min_mm),
+            (machine_limits.x_max_mm, machine_limits.y_max_mm),
+        ]
+
+        return max(
+            corners,
+            key=lambda c: (c[0] - calib_x) ** 2 + (c[1] - calib_y) ** 2,
+        )
+
+    def capture_background_offaxis(
+        self,
+        machine_z_mm: float,
+        exposure_us: float,
+        machine_limits,
+        z_name: str,
+    ) -> list:
+        """
+        Move the camera out of the beam and capture ambient backgrounds at
+        this slice's already-applied calibrated exposure. Frames land in the
+        slice's own z subfolder, tagged as backgrounds.
+        """
+
+        bg_x, bg_y = self.background_xy(machine_limits)
+        self._move_to(bg_x, bg_y, machine_z_mm)
+
+        point = ScanPoint(
+            PlacementID=self.placement.PlacementID,
+            GantryPosition_mm=Vec3D(bg_x, bg_y, machine_z_mm),
+            TablePosition_mm=self.placement.gantry_to_table(
+                Vec3D(bg_x, bg_y, machine_z_mm)
+            ),
+            NShots=self.config.BackgroundShots,
+            Metadata={
+                "ScanKind": "Background",
+                "BackgroundMode": "OffAxisAmbient",
+                "Subfolder": z_name,
+                "FileTag": "background",
+                "Exposure_us": exposure_us,
+                "MachineZ_mm": machine_z_mm,
+                "TableZ_mm": self.config.table_z_mm(machine_z_mm),
+                "SensorZReference": self.config.SensorZReference,
+                **self.config.Metadata,
+            },
+        )
+
+        records = self.writer.acquire_at_current_position(point)
+        self.records.extend(records)
+        return records
+
+    # -- ladder mode: beam-blocked backgrounds, once per placement -----
 
     def capture_background_ladder(self) -> list:
         exposures = self.config.BackgroundExposures_us or default_background_ladder_us()
@@ -363,6 +453,19 @@ class AutoScanSession:
                 f"converged={calibration.Converged})"
             )
 
+            if self.config.BackgroundMode == "offaxis":
+                background_records = self.capture_background_offaxis(
+                    machine_z,
+                    calibration.FinalExposure_us,
+                    machine_limits,
+                    z_name,
+                )
+                bg_x, bg_y = self.background_xy(machine_limits)
+                self.echo(
+                    f"    {len(background_records)} off-axis background "
+                    f"frame(s) at X{bg_x:g} Y{bg_y:g}"
+                )
+
             plan = XYCrossSectionPlan(
                 Placement=self.placement,
                 MachineLimits=machine_limits,
@@ -393,27 +496,35 @@ class AutoScanSession:
     # -- everything ----------------------------------------------------
 
     def run(self, machine_limits) -> list:
-        self.writer.write_json_artifact(
-            "auto_scan_setup.json",
-            {
-                "PlacementID": self.config.PlacementID,
-                "MeasuredSensorZ_mm": self.config.MeasuredSensorZ_mm,
-                "SensorZReference": self.config.SensorZReference,
-                "ZStart_machine_mm": self.config.ZStart_machine_mm,
-                "ZStop_machine_mm": self.config.ZStop_machine_mm,
-                "ZStep_mm": self.config.ZStep_mm,
-                "X": self.config.X,
-                "Y": self.config.Y,
-                "NShots": self.config.NShots,
-                "BackgroundExposures_us": list(
-                    self.config.BackgroundExposures_us
-                    or default_background_ladder_us()
-                ),
-                "BackgroundShots": self.config.BackgroundShots,
-                "Metadata": self.config.Metadata,
-                "PlacementNotes": self.placement.Notes,
-            },
-        )
+        setup = {
+            "PlacementID": self.config.PlacementID,
+            "MeasuredSensorZ_mm": self.config.MeasuredSensorZ_mm,
+            "SensorZReference": self.config.SensorZReference,
+            "ZStart_machine_mm": self.config.ZStart_machine_mm,
+            "ZStop_machine_mm": self.config.ZStop_machine_mm,
+            "ZStep_mm": self.config.ZStep_mm,
+            "X": self.config.X,
+            "Y": self.config.Y,
+            "NShots": self.config.NShots,
+            "BackgroundMode": self.config.BackgroundMode,
+            "BackgroundShots": self.config.BackgroundShots,
+            "Metadata": self.config.Metadata,
+            "PlacementNotes": self.placement.Notes,
+        }
 
-        self.capture_background_ladder()
+        if self.config.BackgroundMode == "offaxis":
+            bg_x, bg_y = self.background_xy(machine_limits)
+            setup["BackgroundXY_mm"] = [bg_x, bg_y]
+
+        if self.config.BackgroundMode == "ladder":
+            setup["BackgroundExposures_us"] = list(
+                self.config.BackgroundExposures_us
+                or default_background_ladder_us()
+            )
+
+        self.writer.write_json_artifact("auto_scan_setup.json", setup)
+
+        if self.config.BackgroundMode == "ladder":
+            self.capture_background_ladder()
+
         return self.run_z_stack(machine_limits)

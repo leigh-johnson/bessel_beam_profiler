@@ -52,11 +52,22 @@ import click
 @click.option("--z-stop", default=-5.0, show_default=True, type=float, help="Machine Z to scan up to.")
 @click.option("--z-step", default=10.0, show_default=True, type=float, help="Z interval, mm (10 = 1 cm).")
 # -- backgrounds ------------------------------------------------------------
+@click.option(
+    "--background-mode",
+    default="offaxis",
+    show_default=True,
+    type=click.Choice(["offaxis", "ladder", "none"]),
+    help="offaxis: per-Z ambient backgrounds with the camera parked outside "
+    "the beam at that slice's calibrated exposure (no beam blocking). "
+    "ladder: beam-blocked exposure ladder once per placement. none: skip.",
+)
+@click.option("--background-x", "background_x_mm", default=None, type=float, help="Off-axis background X (machine mm). Default: farthest machine-limit corner.")
+@click.option("--background-y", "background_y_mm", default=None, type=float, help="Off-axis background Y (machine mm). Default: farthest machine-limit corner.")
 @click.option("--background-shots", default=3, show_default=True, type=click.IntRange(min=1))
-@click.option("--background-min-us", default=25.0, show_default=True, type=float)
-@click.option("--background-max-us", default=100000.0, show_default=True, type=float)
-@click.option("--background-count", default=10, show_default=True, type=click.IntRange(min=2))
-@click.option("--skip-background", is_flag=True, help="Skip the background ladder (e.g. quick alignment runs).")
+@click.option("--background-min-us", default=25.0, show_default=True, type=float, help="Ladder mode only.")
+@click.option("--background-max-us", default=100000.0, show_default=True, type=float, help="Ladder mode only.")
+@click.option("--background-count", default=10, show_default=True, type=click.IntRange(min=2), help="Ladder mode only.")
+@click.option("--skip-background", is_flag=True, help="Shorthand for --background-mode none.")
 # -- misc -------------------------------------------------------------------
 @click.option("--metadata", multiple=True, help="Extra manifest metadata as KEY=VALUE. May be repeated.")
 @click.option("--skip-homing", is_flag=True, help="Skip $H (only if already homed THIS power-cycle and placement).")
@@ -79,6 +90,9 @@ def auto_scan(
     z_start: float,
     z_stop: float,
     z_step: float,
+    background_mode: str,
+    background_x_mm,
+    background_y_mm,
     background_shots: int,
     background_min_us: float,
     background_max_us: float,
@@ -132,12 +146,15 @@ def auto_scan(
     status = client.query_status()
     click.echo(f"FluidNC: {status.Raw}")
 
+    if skip_background:
+        background_mode = "none"
+
     background_ladder = (
-        ()
-        if skip_background
-        else default_background_ladder_us(
+        default_background_ladder_us(
             background_min_us, background_max_us, background_count
         )
+        if background_mode == "ladder"
+        else ()
     )
 
     placement_number = 1
@@ -185,6 +202,9 @@ def auto_scan(
                 X=AxisRange(start_mm=x_min, stop_mm=x_max, step_mm=x_step),
                 Y=AxisRange(start_mm=y_min, stop_mm=y_max, step_mm=y_step),
                 NShots=nshots,
+                BackgroundMode=background_mode,
+                BackgroundX_mm=background_x_mm,
+                BackgroundY_mm=background_y_mm,
                 BackgroundExposures_us=background_ladder,
                 BackgroundShots=background_shots,
                 Metadata={
@@ -195,10 +215,18 @@ def auto_scan(
 
             n_z = len(config.z_values_machine_mm())
             n_xy = len(config.X.values()) * len(config.Y.values())
+
+            if background_mode == "offaxis":
+                n_background = n_z * background_shots
+            elif background_mode == "ladder":
+                n_background = len(background_ladder) * background_shots
+            else:
+                n_background = 0
+
             click.echo(
                 f"\nPlan: {n_z} z-slices x {n_xy} XY points x {nshots} shot(s) "
                 f"= {n_z * n_xy * nshots} frames "
-                f"(+ {0 if skip_background else len(background_ladder) * background_shots} background frames)."
+                f"(+ {n_background} background frames, mode={background_mode})."
             )
             click.confirm("Start this placement's scan?", abort=True)
 
@@ -228,13 +256,7 @@ def auto_scan(
                 echo_fn=click.echo,
             )
 
-            if skip_background:
-                session.writer.write_json_artifact(
-                    "auto_scan_setup.json", {"BackgroundSkipped": True}
-                )
-                records = session.run_z_stack(stage.config.MachineLimits_mm)
-            else:
-                records = session.run(stage.config.MachineLimits_mm)
+            records = session.run(stage.config.MachineLimits_mm)
 
             click.echo(f"\nPlacement done: {len(records)} frames in {run_dir}")
 

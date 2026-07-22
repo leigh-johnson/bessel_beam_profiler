@@ -148,7 +148,14 @@ def test_file_tag_keeps_same_position_frames_unique(modules, tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def make_session(modules, tmp_path, n_images=32):
+def make_session(
+    modules,
+    tmp_path,
+    n_images=32,
+    background_mode="ladder",
+    background_x_mm=None,
+    background_y_mm=None,
+):
     # Mid-brightness frames: instantly inside the calibration window.
     images = [
         FakeImage(np.full((4, 4), 150, dtype=np.uint8)) for _ in range(n_images)
@@ -164,6 +171,9 @@ def make_session(modules, tmp_path, n_images=32):
         X=modules.coordinates.AxisRange(start_mm=55.0, stop_mm=60.0, step_mm=5.0),
         Y=modules.coordinates.AxisRange(start_mm=80.0, stop_mm=80.0, step_mm=5.0),
         NShots=1,
+        BackgroundMode=background_mode,
+        BackgroundX_mm=background_x_mm,
+        BackgroundY_mm=background_y_mm,
         BackgroundExposures_us=(100.0, 1000.0),
         BackgroundShots=1,
     )
@@ -245,6 +255,96 @@ def test_auto_scan_frames_record_exposure_and_scan_kind(modules, tmp_path):
         assert record["Extra"]["Exposure_us"] > 0
         assert record["Extra"]["SensorZReference"] == "axicon3"
         assert record["Extra"]["Subfolder"] in ("z0100.00cm", "z0101.00cm")
+
+
+def test_offaxis_background_position_defaults_to_farthest_corner(modules, tmp_path):
+    session, _, _ = make_session(modules, tmp_path, background_mode="offaxis")
+    limits = modules.coordinates.Bounds3D(**LIMITS_KW)
+
+    # Calibration point is (57.5, 80); the farthest limit corner is x_max
+    # with y_min (list order breaks the y-tie deterministically).
+    assert session.background_xy(limits) == (120.0, 0.0)
+
+
+def test_offaxis_background_position_honors_explicit_config(modules, tmp_path):
+    session, _, _ = make_session(
+        modules,
+        tmp_path,
+        background_mode="offaxis",
+        background_x_mm=10.0,
+        background_y_mm=150.0,
+    )
+    limits = modules.coordinates.Bounds3D(**LIMITS_KW)
+
+    assert session.background_xy(limits) == (10.0, 150.0)
+
+
+def test_offaxis_run_puts_matched_backgrounds_in_each_z_folder(modules, tmp_path):
+    session, writer, pauses = make_session(
+        modules, tmp_path, background_mode="offaxis"
+    )
+    limits = modules.coordinates.Bounds3D(**LIMITS_KW)
+
+    records = session.run(limits)
+
+    # 2 z-slices x (1 background shot + 2 XY points); no ladder, no prompts.
+    assert len(records) == 6
+    assert pauses == []
+    assert not (writer.run_dir / "background").exists()
+
+    manifest = [
+        json.loads(line)
+        for line in (writer.run_dir / "frames.jsonl").read_text().splitlines()
+    ]
+    backgrounds = [r for r in manifest if r["Extra"]["ScanKind"] == "Background"]
+    scans = [r for r in manifest if r["Extra"]["ScanKind"] == "AutoZStack"]
+
+    assert len(backgrounds) == 2
+    assert len(scans) == 4
+
+    for z_name in ("z0100.00cm", "z0101.00cm"):
+        z_dir = writer.run_dir / z_name
+        npy_files = sorted(p.name for p in z_dir.glob("*.npy"))
+        assert len(npy_files) == 3
+        assert sum("background" in name for name in npy_files) == 1
+
+        z_backgrounds = [
+            r for r in backgrounds if r["Extra"]["Subfolder"] == z_name
+        ]
+        assert len(z_backgrounds) == 1
+        background = z_backgrounds[0]
+
+        # Exact exposure match with this slice's calibration, taken at the
+        # off-axis corner, mode recorded for analysis.
+        calibration = json.loads((z_dir / "calibration_result.json").read_text())
+        assert background["Extra"]["Exposure_us"] == calibration["FinalExposure_us"]
+        assert background["Extra"]["BackgroundMode"] == "OffAxisAmbient"
+        assert background["GantryPosition_mm"] == {
+            "x_mm": 120.0,
+            "y_mm": 0.0,
+            "z_mm": calibration["MachineZ_mm"],
+        }
+
+    setup = json.loads((writer.run_dir / "auto_scan_setup.json").read_text())
+    assert setup["BackgroundMode"] == "offaxis"
+    assert setup["BackgroundXY_mm"] == [120.0, 0.0]
+    assert "BackgroundExposures_us" not in setup
+
+
+def test_background_mode_none_skips_all_backgrounds(modules, tmp_path):
+    session, writer, pauses = make_session(modules, tmp_path, background_mode="none")
+    limits = modules.coordinates.Bounds3D(**LIMITS_KW)
+
+    records = session.run(limits)
+
+    assert len(records) == 4  # scans only
+    assert pauses == []
+
+    manifest = [
+        json.loads(line)
+        for line in (writer.run_dir / "frames.jsonl").read_text().splitlines()
+    ]
+    assert all(r["Extra"]["ScanKind"] == "AutoZStack" for r in manifest)
 
 
 def test_calibration_seeds_next_z_from_previous_exposure(modules, tmp_path):

@@ -48,17 +48,32 @@ Workflow per placement (repeats for as many placements as you want):
    Z = `--z-start` and enter it (cm). Table z for every slice is derived
    from this: `table_z = measured + (machineZ − z_start)` (+Z is up, along
    the beam).
-3. **Backgrounds**: you block the beam once when prompted; frames are
-   captured across a log-spaced exposure *ladder* (default 10 rungs,
-   25 µs → 100 ms, 3 shots each) so any per-z calibrated exposure has a
-   near-matching background for subtraction. Then you unblock.
-4. For each machine Z: the camera moves to the calibration point (raster
+3. For each machine Z: the camera moves to the calibration point (raster
    center), exposure auto-calibrates headlessly (seeded from the previous
    z; halve when saturated, proportional step up when dim, accept when max
    is in [60%, 100%) of the saturation threshold with zero saturated
-   pixels), then the XY raster runs.
-5. At the end you can move the gantry to a new placement; it re-homes and
+   pixels), then **backgrounds** are captured (see below), then the XY
+   raster runs.
+4. At the end you can move the gantry to a new placement; it re-homes and
    asks for a fresh distance measurement, and a new run directory begins.
+
+### Background modes (`--background-mode`)
+
+* `offaxis` (default): at each Z, right after calibration, the camera
+  drives to an XY position outside the beam (default: the machine-limit
+  corner farthest from the raster; override with `--background-x/-y`) and
+  captures `--background-shots` frames at that slice's calibrated
+  exposure. Exact exposure match per slice, tracks drift over the run, no
+  manual beam blocking — it corrects for ambient light (plus whatever
+  stray scatter reaches the off-axis position). **Validate once**: at the
+  highest-exposure (dimmest) slice, compare a corner frame with the beam
+  on vs. physically blocked; if they match, the corner is beam-free.
+* `ladder`: once per placement, you block the beam when prompted and a
+  log-spaced exposure ladder is captured (default 10 rungs, 25 µs → 100 ms,
+  3 shots each) into `background/`. At analysis time subtract the rung
+  nearest each frame's exposure (or interpolate — background is ~linear in
+  exposure). Use this if the off-axis position can't be made beam-free.
+* `none` (or `--skip-background`): quick alignment runs.
 
 `Ctrl-C` sends a feed hold (`!`) to the gantry before exiting.
 
@@ -70,13 +85,15 @@ data/auto_scan-2026-07-22_14-01-05/        # one run dir per placement
     auto_scan_setup.json                   # placement, ranges, ladder, optics
     camera_settings.json
     frames.jsonl                           # global manifest (all frames)
-    background/
+    background/                            # ladder mode only
         frames.jsonl
         placement-01-exp0000100.0us-...-shot0000.npy  (+ .jpg)
     z0100.00cm/                            # table z in the folder name
         frames.jsonl                       # per-z manifest (stitchable)
         calibration_result.json            # exposure, max, converged
         calibrated_camera_settings.json
+        placement-01-background-...-shot0000.npy      # offaxis mode: the
+                                           # slice's exposure-matched background
         placement-01-...-gantryx...y...z...-shot0000.npy  (+ .jpg)
     z0101.00cm/
         ...
@@ -84,9 +101,11 @@ data/auto_scan-2026-07-22_14-01-05/        # one run dir per placement
 
 Every frame's manifest record carries `Exposure_us`, `MachineZ_mm`,
 `TableZ_mm`, `SensorZReference`, and `ScanKind`
-(`AutoZStack` / `Background`), so analysis can pick the background rung
-nearest each frame's exposure (background level is ~linear in exposure —
-interpolate between the two nearest rungs).
+(`AutoZStack` / `Background`; off-axis backgrounds also record
+`BackgroundMode: OffAxisAmbient` and their gantry position). In offaxis
+mode, subtraction is trivial: each z folder contains its own
+exposure-matched background. In ladder mode, pick the rung nearest each
+frame's exposure or interpolate (background is ~linear in exposure).
 
 ## Defaults worth knowing
 
