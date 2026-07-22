@@ -40,6 +40,10 @@ class DatasetWriterConfig:
     # We can encode to BMP or PNG later, but want to avoid any lossy compression at this stage.
     ImageExtension: str = ".npy"
 
+    # Group frames into per-z subfolders of the run directory (named from
+    # TablePosition_mm.z_mm) when no explicit Metadata["Subfolder"] is set.
+    GroupByZSubfolder: bool = False
+
     def make_run_dir(self) -> Path:
         now = dt.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
         return self.DatasetRoot / f"{self.JobType}-{now}"
@@ -114,18 +118,9 @@ class StageController:
         signals.MovementComplete.set()
 
 
-# TODO: wrap calls to FluidNC, which will be running on an ESP32 microcontroller
-# to drive stepper motors.
-# http://wiki.fluidnc.com/en/home
-# class FluidNCStageController(StageController):
-#     def move_to_scan_point(self, point, signals):
-#         xyz = point.GantryPosition_mm
-#         # TODO send G-code / FluidNC command using xyz.x_mm, xyz.y_mm, xyz.z_mm
-#         signals.MovementStarted.set()
-
-#     def wait_until_motion_complete(self, point, timeout_s, signals):
-#         # TODO poll FluidNC until idle
-#         signals.MovementComplete.set()
+# The FluidNC implementation of this interface lives in
+# fluidnc_stage.FluidNCStageController (kept in its own module so this one
+# stays importable without any networking / gantry concerns).
 
 
 @dataclass(frozen=True)
@@ -487,15 +482,47 @@ class FLIRDatasetWriter(FLIRCameraControllerBase):
         )
 
     def _frame_path(self, point: ScanPoint, shot_idx: int) -> Path:
+        # Optional filename tag to keep otherwise-identical points unique,
+        # e.g. the rungs of a background exposure ladder taken at one
+        # position (Metadata["FileTag"] = "exp000123.0us").
+        file_tag = (point.Metadata or {}).get("FileTag")
+        tag_part = f"{_format_placement_id(str(file_tag))}-" if file_tag else ""
+
         filename = (
             f"{_format_placement_id(point.PlacementID)}-"
+            f"{tag_part}"
             f"tablez{_format_mm(point.TablePosition_mm.z_mm)}-"
             f"gantry{_format_vec3(point.GantryPosition_mm)}-"
             f"shot{shot_idx:04d}"
             f"{self.config.ImageExtension}"
         )
 
-        return self.run_dir / filename
+        return self._point_dir(point) / filename
+
+    def _point_dir(self, point: ScanPoint) -> Path:
+        """
+        Directory a point's frames are saved in.
+
+        Frames are grouped into a per-position subfolder of the run
+        directory when either:
+
+            * point.Metadata["Subfolder"] names one explicitly (used by the
+              auto scan for z-position folders and the background ladder), or
+            * config.GroupByZSubfolder is set, in which case the table
+              z-position is used, e.g. "z_p0001000.000mm/".
+        """
+
+        name = (point.Metadata or {}).get("Subfolder")
+
+        if not name and self.config.GroupByZSubfolder:
+            name = f"z_{_format_mm(point.TablePosition_mm.z_mm)}"
+
+        if not name:
+            return self.run_dir
+
+        subdir = self.run_dir / _format_placement_id(str(name))
+        subdir.mkdir(parents=True, exist_ok=True)
+        return subdir
 
     def _write_array(self, path: Path, arr: np.ndarray) -> None:
         if path.suffix == ".npy":
@@ -512,8 +539,19 @@ class FLIRDatasetWriter(FLIRCameraControllerBase):
         )
 
     def _append_manifest(self, record: FrameRecord) -> None:
+        line = json.dumps(_dataclass_to_jsonable(record)) + "\n"
+
         with self.manifest_path.open("a") as f:
-            f.write(json.dumps(_dataclass_to_jsonable(record)) + "\n")
+            f.write(line)
+
+        # Frames grouped into a subfolder also get a local frames.jsonl so
+        # each z-position folder is self-contained (e.g. for per-z
+        # stitching with stitcher.stitch_run_dir on the subfolder).
+        parent = Path(record.Path).parent
+
+        if parent != self.run_dir:
+            with (parent / "frames.jsonl").open("a") as f:
+                f.write(line)
 
 
 
