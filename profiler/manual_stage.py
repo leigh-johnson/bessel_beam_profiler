@@ -129,7 +129,11 @@ class ManualStageSession:
             PlacementID=self.config.PlacementID,
             # No stage coordinates are tracked in manual mode.
             GantryPosition_mm=Vec3D(0.0, 0.0, 0.0),
-            TablePosition_mm=Vec3D(0.0, 0.0, self.config.SensorZ_mm),
+            # Coordinate convention: Y = distance along the beam from the
+            # reference optic (X horizontal transverse, Z vertical). The
+            # SensorZ_mm field name is legacy; its value is the beam-path
+            # distance and therefore lives in TablePosition y.
+            TablePosition_mm=Vec3D(0.0, self.config.SensorZ_mm, 0.0),
             NShots=1,
             Metadata={
                 "ScanKind": "ManualStage",

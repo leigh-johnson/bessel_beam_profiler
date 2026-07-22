@@ -79,8 +79,9 @@ def test_save_frame_array_writes_npy_and_manifest(modules, tmp_path):
     assert session.move_index == 1
     assert session.saved_records == [record]
 
-    # z-position of the sensor is captured in table coordinates + metadata.
-    assert record.TablePosition_mm.z_mm == 65.0
+    # Beam-path distance of the sensor is captured in table Y + metadata
+    # (convention: X horizontal transverse, Y along the beam, Z vertical).
+    assert record.TablePosition_mm.y_mm == 65.0
     assert record.Extra["ScanKind"] == "ManualStage"
     assert record.Extra["MoveIndex"] == 0
     assert record.Extra["SensorZ_mm"] == 65.0
@@ -93,7 +94,7 @@ def test_save_frame_array_writes_npy_and_manifest(modules, tmp_path):
     assert len(manifest_lines) == 1
 
     manifest_record = json.loads(manifest_lines[0])
-    assert manifest_record["TablePosition_mm"]["z_mm"] == 65.0
+    assert manifest_record["TablePosition_mm"]["y_mm"] == 65.0
     assert manifest_record["Extra"]["MoveIndex"] == 0
 
 

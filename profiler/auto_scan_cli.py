@@ -1,12 +1,17 @@
 """
-`dataset auto` — automated Z-stack scans on the FluidNC gantry.
+`dataset auto` — automated beam-stack scans on the FluidNC gantry.
+
+Coordinate convention (one frame, used everywhere): X = horizontal
+transverse, Y = beam propagation down the table, Z = vertical. The scan
+captures X-Z cross-section slices and steps along Y.
 
 Implements the placement workflow end to end: prompt for the manually
-measured optic->sensor distance, home the machine, capture a background
-exposure ladder (beam blocked once), then for each machine Z step run a
-headless exposure calibration followed by an XY raster. Frames are grouped
-into per-z subfolders (z0100.00cm/...) inside a timestamped run directory,
-one run directory per gantry placement.
+measured optic->sensor distance (with the camera at machine Y = --y-start),
+home the machine, then for each Y step run a headless exposure calibration,
+an off-axis ambient background when the exposure has drifted, and the X-Z
+raster (adaptive by default). Frames are grouped into per-slice subfolders
+(y0100.00cm/...) inside a timestamped run directory, one run directory per
+gantry placement.
 """
 
 from __future__ import annotations
@@ -36,7 +41,7 @@ logger = logging.getLogger(__name__)
 )
 @click.option("--camera-index", default=0, show_default=True, type=click.IntRange(min=0))
 @click.option("--acquisition-timeout-ms", default=2000, show_default=True, type=click.IntRange(min=1))
-@click.option("--nshots", default=1, show_default=True, type=click.IntRange(min=1), help="Shots per XY point.")
+@click.option("--nshots", default=1, show_default=True, type=click.IntRange(min=1), help="Shots per raster point.")
 @click.option("--settle-time-s", default=0.0, show_default=True, type=click.FloatRange(min=0.0), help="Extra pause between motion-complete and trigger.")
 # -- output -----------------------------------------------------------------
 @click.option(
@@ -45,7 +50,7 @@ logger = logging.getLogger(__name__)
     type=click.Path(file_okay=False, path_type=Path),
     help="Root directory; one timestamped run directory is created per placement.",
 )
-# -- XY raster --------------------------------------------------------------
+# -- X-Z cross-section raster -----------------------------------------------
 @click.option(
     "--raster",
     "raster_mode",
@@ -53,33 +58,43 @@ logger = logging.getLogger(__name__)
     show_default=True,
     type=click.Choice(["adaptive", "fixed"]),
     help="adaptive: grow the raster from one seed frame until its edges are "
-    "dark (x/y ranges act as the CAP; a beam that fits in one frame takes "
-    "one frame). fixed: always raster the full x/y grid.",
+    "dark (x/z ranges act as the CAP; a beam that fits in one frame takes "
+    "one frame). fixed: always raster the full x/z grid.",
 )
-@click.option("--x-min", default=45.0, show_default=True, type=float)
+@click.option("--x-min", default=45.0, show_default=True, type=float, help="Horizontal transverse (machine X), mm.")
 @click.option("--x-max", default=75.0, show_default=True, type=float)
 @click.option("--x-step", default=5.0, show_default=True, type=float, help="~30% overlap for the 7.1 mm-wide sensor.")
-@click.option("--y-min", default=65.0, show_default=True, type=float)
-@click.option("--y-max", default=95.0, show_default=True, type=float)
-@click.option("--y-step", default=4.0, show_default=True, type=float, help="~25% overlap for the 5.3 mm-tall sensor.")
+@click.option("--z-min", default=-75.0, show_default=True, type=float, help="Vertical (machine Z, negative = down), mm.")
+@click.option("--z-max", default=-45.0, show_default=True, type=float)
+@click.option("--z-step", default=4.0, show_default=True, type=float, help="~25% overlap for the 5.3 mm-tall sensor.")
 @click.option("--signal-margin", default=8.0, show_default=True, type=float, help="Adaptive: counts above the background p99 that count as beam signal.")
 @click.option("--min-signal-pixels", default=50, show_default=True, type=click.IntRange(min=1), help="Adaptive: pixels above threshold needed to call a border strip 'signal'.")
-# -- Z stack (machine coordinates: negative, -120 near optics .. -2 top) ----
-@click.option("--z-start", default=-120.0, show_default=True, type=float, help="Machine Z of the FIRST (closest to optic) slice.")
-@click.option("--z-stop", default=-5.0, show_default=True, type=float, help="Machine Z to scan up to.")
-@click.option("--z-step", default=10.0, show_default=True, type=float, help="Z interval, mm (10 = 1 cm).")
+# -- Y stack: stepping along the beam ---------------------------------------
+@click.option("--y-start", default=10.0, show_default=True, type=float, help="Machine Y of the FIRST slice (where you measure the optic->sensor distance).")
+@click.option("--y-stop", default=150.0, show_default=True, type=float, help="Machine Y to scan up to.")
+@click.option("--y-step", default=10.0, show_default=True, type=float, help="Beam-direction interval, mm (10 = 1 cm).")
+@click.option(
+    "--beam-direction",
+    default="+y",
+    show_default=True,
+    type=click.Choice(["+y", "-y"]),
+    help="+y if machine +Y points downstream (away from the optic), -y if "
+    "toward it. Verify once: jog +Y and check the camera moves away from "
+    "the optic.",
+)
 # -- backgrounds ------------------------------------------------------------
 @click.option(
     "--background-mode",
     default="offaxis",
     show_default=True,
     type=click.Choice(["offaxis", "ladder", "none"]),
-    help="offaxis: per-Z ambient backgrounds with the camera parked outside "
-    "the beam at that slice's calibrated exposure (no beam blocking). "
-    "ladder: beam-blocked exposure ladder once per placement. none: skip.",
+    help="offaxis: per-slice ambient backgrounds with the camera parked "
+    "outside the beam (in X/Z) at that slice's calibrated exposure (no "
+    "beam blocking). ladder: beam-blocked exposure ladder once per "
+    "placement. none: skip.",
 )
-@click.option("--background-x", "background_x_mm", default=None, type=float, help="Off-axis background X (machine mm). Default: farthest machine-limit corner.")
-@click.option("--background-y", "background_y_mm", default=None, type=float, help="Off-axis background Y (machine mm). Default: farthest machine-limit corner.")
+@click.option("--background-x", "background_x_mm", default=None, type=float, help="Off-axis background X (machine mm). Default: farthest machine-limit X/Z corner.")
+@click.option("--background-z", "background_z_mm", default=None, type=float, help="Off-axis background Z (machine mm). Default: farthest machine-limit X/Z corner.")
 @click.option(
     "--background-exposure-change",
     default=0.10,
@@ -112,17 +127,18 @@ def auto_scan(
     x_min: float,
     x_max: float,
     x_step: float,
-    y_min: float,
-    y_max: float,
-    y_step: float,
+    z_min: float,
+    z_max: float,
+    z_step: float,
     signal_margin: float,
     min_signal_pixels: int,
-    z_start: float,
-    z_stop: float,
-    z_step: float,
+    y_start: float,
+    y_stop: float,
+    y_step: float,
+    beam_direction: str,
     background_mode: str,
     background_x_mm,
-    background_y_mm,
+    background_z_mm,
     background_exposure_change: float,
     background_shots: int,
     background_min_us: float,
@@ -133,10 +149,10 @@ def auto_scan(
     skip_homing: bool,
 ) -> None:
     """
-    Automated Z-stack of XY beam cross-sections using the FluidNC gantry.
+    Automated stack of X-Z beam cross-sections stepped along Y (the beam).
 
     Repeats for as many gantry placements as you like; each placement gets
-    its own run directory with per-z subfolders.
+    its own run directory with per-slice subfolders.
     """
 
     from auto_scan import (
@@ -212,12 +228,12 @@ def auto_scan(
 
             click.echo(
                 f"\nMeasure the distance from the optic to the camera sensor "
-                f"with the camera at machine Z = {z_start:g} mm."
+                f"along the beam, with the camera at machine Y = {y_start:g} mm."
             )
             measured_cm = click.prompt(
                 "Measured optic -> sensor distance (cm)", type=float
             )
-            sensor_z_reference = click.prompt(
+            measured_from = click.prompt(
                 "Optic the distance is measured from",
                 default="axicon3",
                 show_default=True,
@@ -225,20 +241,21 @@ def auto_scan(
 
             config = AutoScanConfig(
                 PlacementID=placement_id,
-                MeasuredSensorZ_mm=measured_cm * 10.0,
-                SensorZReference=sensor_z_reference,
-                ZStart_machine_mm=z_start,
-                ZStop_machine_mm=z_stop,
-                ZStep_mm=z_step,
+                MeasuredSensorY_mm=measured_cm * 10.0,
+                MeasuredFrom=measured_from,
+                YStart_machine_mm=y_start,
+                YStop_machine_mm=y_stop,
+                YStep_mm=y_step,
+                BeamDirectionSign=1 if beam_direction == "+y" else -1,
                 X=AxisRange(start_mm=x_min, stop_mm=x_max, step_mm=x_step),
-                Y=AxisRange(start_mm=y_min, stop_mm=y_max, step_mm=y_step),
+                Z=AxisRange(start_mm=z_min, stop_mm=z_max, step_mm=z_step),
                 RasterMode=raster_mode,
                 SignalMargin_counts=signal_margin,
                 MinSignalPixels=min_signal_pixels,
                 NShots=nshots,
                 BackgroundMode=background_mode,
                 BackgroundX_mm=background_x_mm,
-                BackgroundY_mm=background_y_mm,
+                BackgroundZ_mm=background_z_mm,
                 BackgroundExposureChangeFraction=background_exposure_change,
                 BackgroundExposures_us=background_ladder,
                 BackgroundShots=background_shots,
@@ -248,13 +265,13 @@ def auto_scan(
                 },
             )
 
-            n_z = len(config.z_values_machine_mm())
-            n_xy = len(config.X.values()) * len(config.Y.values())
+            n_slices = len(config.y_values_machine_mm())
+            n_xz = len(config.X.values()) * len(config.Z.values())
 
             if background_mode == "offaxis":
                 # Upper bound: slices whose exposure moved < the change
                 # threshold reuse the previous background.
-                n_background = f"up to {n_z * background_shots}"
+                n_background = f"up to {n_slices * background_shots}"
             elif background_mode == "ladder":
                 n_background = str(len(background_ladder) * background_shots)
             else:
@@ -262,16 +279,16 @@ def auto_scan(
 
             if raster_mode == "adaptive":
                 click.echo(
-                    f"\nPlan: {n_z} z-slices, adaptive raster capped at "
-                    f"{n_xy} XY points x {nshots} shot(s) per slice "
-                    f"(up to {n_z * n_xy * nshots} frames; typically far "
+                    f"\nPlan: {n_slices} Y-slices, adaptive X-Z raster capped "
+                    f"at {n_xz} points x {nshots} shot(s) per slice "
+                    f"(up to {n_slices * n_xz * nshots} frames; typically far "
                     f"fewer; + {n_background} background frames, "
                     f"mode={background_mode})."
                 )
             else:
                 click.echo(
-                    f"\nPlan: {n_z} z-slices x {n_xy} XY points x {nshots} "
-                    f"shot(s) = {n_z * n_xy * nshots} frames "
+                    f"\nPlan: {n_slices} Y-slices x {n_xz} X-Z points x "
+                    f"{nshots} shot(s) = {n_slices * n_xz * nshots} frames "
                     f"(+ {n_background} background frames, mode={background_mode})."
                 )
             click.confirm("Start this placement's scan?", abort=True)

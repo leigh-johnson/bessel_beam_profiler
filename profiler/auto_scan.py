@@ -1,24 +1,37 @@
 """
-Automated Z-stack acquisition on the FluidNC gantry.
+Automated beam-stack acquisition on the FluidNC gantry.
 
-One "placement" = one physical position of the CNC gantry on the optics
-table, and runs as:
+COORDINATE CONVENTION — one frame, used everywhere:
+
+    X = horizontal transverse (perpendicular to the beam)
+    Y = beam propagation direction down the table
+    Z = vertical (perpendicular to the optics table)
+
+The gantry's machine axes coincide with this frame after homing, so
+ScanPoint.GantryPosition_mm IS the machine coordinate. TablePosition_mm
+differs only in Y, where the per-placement measurement anchors machine Y
+to the beamline:
+
+    TableY = MeasuredSensorY + BeamDirectionSign * (machineY - YStart)
+
+(X and Z table coordinates are left equal to machine coordinates; only the
+along-beam position is measured against the optic.)
+
+A cross-section of the beam is therefore an X-Z raster at fixed machine Y
+(an "XZ slice"), and the scan steps down the beam along Y:
 
     1. You manually measure the optic -> camera-sensor distance with the
-       camera at the scan's starting machine Z, and enter it when prompted.
-    2. Background frames (beam blocked) are captured across an exposure
-       LADDER, so any per-z calibrated exposure later has a near-matching
-       background for subtraction.
-    3. At each machine Z step: exposure is auto-calibrated (headless, seeded
-       from the previous z), then an XY raster of frames is captured.
-    4. Frames land in per-z subfolders of the run directory, named by the
-       table z-position, e.g. run_dir/z0100.00cm/, each with its own
-       frames.jsonl and calibration JSON. Background frames land in
-       run_dir/background/.
+       camera at machine Y = YStart, and enter it when prompted.
+    2. At each Y step: exposure is auto-calibrated (headless, seeded from
+       the previous slice), an off-axis ambient background is captured
+       when needed (see BackgroundMode), then the X-Z raster runs
+       (adaptive by default).
+    3. Frames land in per-slice subfolders named by the distance from the
+       optic, e.g. run_dir/y0100.00cm/, each with its own frames.jsonl,
+       calibration, raster metadata, and background reference.
 
-Machine-coordinate conventions (see fluidnc_stage.py): GantryPosition_mm is
-the absolute machine coordinate; +Z is up = along the beam = away from the
-axicon, so TableZ_mm = MeasuredSensorZ_mm + (machineZ - ZStart_machine).
+Verify BeamDirectionSign once on hardware: move +Y and check the camera
+moves AWAY from the optic (sign +1) or toward it (sign -1).
 """
 
 from __future__ import annotations
@@ -32,14 +45,7 @@ import logging
 import numpy as np
 
 from adaptive_raster import AdaptiveRasterConfig, AdaptiveRasterRunner
-from coordinates import (
-    AxisRange,
-    Bounds2D,
-    GantryPlacement,
-    ScanPoint,
-    Vec3D,
-    XYCrossSectionPlan,
-)
+from coordinates import AxisRange, ScanPoint, Vec3D
 from headless_calibration import (
     HeadlessCalibrationConfig,
     HeadlessCalibrationResult,
@@ -64,27 +70,32 @@ def default_background_ladder_us(
 class AutoScanConfig:
     PlacementID: str
 
-    # Manually measured optic -> camera-sensor distance (mm) with the camera
-    # at machine Z = ZStart_machine_mm, plus what it was measured from.
-    MeasuredSensorZ_mm: float
-    SensorZReference: str = "axicon3"
+    # Manually measured optic -> camera-sensor distance along the beam (mm)
+    # with the camera at machine Y = YStart_machine_mm, plus which optic it
+    # was measured from.
+    MeasuredSensorY_mm: float
+    MeasuredFrom: str = "axicon3"
 
-    # Machine-coordinate Z stack (negative values; larger = farther from
-    # the optic). The scan starts at ZStart and steps by ZStep_mm.
-    ZStart_machine_mm: float = -120.0
-    ZStop_machine_mm: float = -5.0
-    ZStep_mm: float = 10.0
+    # Beam-propagation stack: machine Y positions stepped along the beam.
+    YStart_machine_mm: float = 10.0
+    YStop_machine_mm: float = 150.0
+    YStep_mm: float = 10.0
 
-    # XY raster (machine coordinates) captured at every Z. In adaptive
-    # raster mode these are the CAPS (maximum extent), not the fixed grid.
+    # +1 if machine +Y points downstream (away from the optic), -1 if
+    # machine +Y points toward it. VERIFY ONCE on hardware.
+    BeamDirectionSign: int = 1
+
+    # X-Z cross-section raster (machine coordinates) at every Y. In
+    # adaptive raster mode these are the CAPS (maximum extent), not the
+    # fixed grid. X = horizontal transverse, Z = vertical.
     X: AxisRange = AxisRange(start_mm=45.0, stop_mm=75.0, step_mm=5.0)
-    Y: AxisRange = AxisRange(start_mm=65.0, stop_mm=95.0, step_mm=4.0)
+    Z: AxisRange = AxisRange(start_mm=-75.0, stop_mm=-45.0, step_mm=4.0)
 
     # "adaptive": start from one seed frame at the calibration point and
     #   grow the rectangle only while its edge frames still contain signal
     #   (background-referenced). If the beam fits in one camera frame, the
     #   slice completes after a single position.
-    # "fixed": raster the full X x Y grid at every slice.
+    # "fixed": raster the full X x Z grid at every slice.
     RasterMode: str = "adaptive"
 
     # Adaptive-raster signal test: a border strip "has signal" when at
@@ -96,7 +107,8 @@ class AutoScanConfig:
     # "any" = orientation-independent border test (default, safe;
     # overshoots the beam extent by <= ~1 frame per side). "directional"
     # tests only the outward-facing strip and needs the image->machine axis
-    # mapping below verified once on hardware.
+    # mapping below verified once on hardware. In the raster lattice,
+    # lattice-x = machine X and lattice-y = machine Z.
     BorderTest: str = "any"
     ImageTranspose: bool = False
     ImageFlipX: bool = False
@@ -106,39 +118,35 @@ class AutoScanConfig:
     # (background mode "ladder" or "none").
     FallbackBackgroundP99_counts: float = 5.0
 
+    # Where the camera sits during exposure calibration (beam core), in
+    # machine X/Z. None = center of the X/Z raster caps.
+    CalibrationX_mm: Optional[float] = None
+    CalibrationZ_mm: Optional[float] = None
+
+    NShots: int = 1
+
+    # How beam-off/ambient backgrounds are captured:
+    #
+    #   "offaxis" (default): at each Y, right after exposure calibration,
+    #       the camera moves to an X/Z position outside the beam and
+    #       captures backgrounds at that slice's calibrated exposure —
+    #       exact exposure match, drift tracking, no manual beam blocking.
+    #   "ladder": once per placement, you block the beam when prompted and
+    #       a log-spaced exposure ladder is captured.
+    #   "none": no backgrounds (quick alignment runs).
+    BackgroundMode: str = "offaxis"
+
+    # Off-axis background position (machine X/Z). None = automatically use
+    # the machine-limit X/Z corner farthest from the calibration point.
+    BackgroundX_mm: Optional[float] = None
+    BackgroundZ_mm: Optional[float] = None
+
     # Off-axis mode: recapture the background only when the calibrated
     # exposure has changed by at least this fraction since the background
     # was last CAPTURED (cumulative, so slow drift still triggers a
     # refresh). Slices that reuse an earlier background record it in their
     # background_reference.json. 0.0 = capture at every slice.
     BackgroundExposureChangeFraction: float = 0.10
-
-    # Where the camera sits during exposure calibration (beam core).
-    # None = center of the XY raster.
-    CalibrationX_mm: Optional[float] = None
-    CalibrationY_mm: Optional[float] = None
-
-    NShots: int = 1
-
-    # How beam-off/ambient backgrounds are captured:
-    #
-    #   "offaxis" (default): at each Z, right after exposure calibration,
-    #       the camera moves to an XY position outside the beam and captures
-    #       backgrounds at that slice's calibrated exposure — exact exposure
-    #       match, per-slice drift tracking, no manual beam blocking.
-    #       Captures ambient light only (plus any stray scatter reaching the
-    #       off-axis position); validate once on hardware that the position
-    #       is beam-free at the highest exposure in the stack.
-    #   "ladder": once per placement, you block the beam when prompted and a
-    #       log-spaced exposure ladder is captured (subtract the nearest /
-    #       interpolated rung at analysis time).
-    #   "none": no backgrounds (quick alignment runs).
-    BackgroundMode: str = "offaxis"
-
-    # Off-axis background position (machine coords). None = automatically
-    # use the machine-limit corner farthest from the calibration point.
-    BackgroundX_mm: Optional[float] = None
-    BackgroundY_mm: Optional[float] = None
 
     # Ladder mode only: exposures for the beam-blocked ladder.
     BackgroundExposures_us: tuple[float, ...] = ()
@@ -147,55 +155,49 @@ class AutoScanConfig:
 
     Metadata: dict[str, Any] = field(default_factory=dict)
 
-    def z_values_machine_mm(self) -> list[float]:
+    def y_values_machine_mm(self) -> list[float]:
         return AxisRange(
-            start_mm=self.ZStart_machine_mm,
-            stop_mm=self.ZStop_machine_mm,
-            step_mm=self.ZStep_mm,
+            start_mm=self.YStart_machine_mm,
+            stop_mm=self.YStop_machine_mm,
+            step_mm=self.YStep_mm,
         ).values()
 
-    def calibration_xy(self) -> tuple[float, float]:
+    def calibration_xz(self) -> tuple[float, float]:
         x = (
             self.CalibrationX_mm
             if self.CalibrationX_mm is not None
             else (self.X.start_mm + self.X.stop_mm) / 2.0
         )
-        y = (
-            self.CalibrationY_mm
-            if self.CalibrationY_mm is not None
-            else (self.Y.start_mm + self.Y.stop_mm) / 2.0
+        z = (
+            self.CalibrationZ_mm
+            if self.CalibrationZ_mm is not None
+            else (self.Z.start_mm + self.Z.stop_mm) / 2.0
         )
-        return x, y
+        return x, z
 
-    def placement(self) -> GantryPlacement:
-        """
-        TableOrigin such that gantry_to_table(z=ZStart) lands on the
-        measured optic->sensor distance. Table X/Y are left in gantry-local
-        coordinates (origin 0), since only z is measured against the optic.
-        """
+    def beam_y_mm(self, machine_y_mm: float) -> float:
+        """Distance from the reference optic along the beam (table Y)."""
 
-        return GantryPlacement(
-            PlacementID=self.PlacementID,
-            TableOrigin_mm=Vec3D(
-                x_mm=0.0,
-                y_mm=0.0,
-                z_mm=self.MeasuredSensorZ_mm - self.ZStart_machine_mm,
-            ),
-            Notes=(
-                f"MeasuredSensorZ={self.MeasuredSensorZ_mm:g}mm after "
-                f"{self.SensorZReference} at machine Z={self.ZStart_machine_mm:g}mm"
-            ),
+        return self.MeasuredSensorY_mm + self.BeamDirectionSign * (
+            machine_y_mm - self.YStart_machine_mm
         )
 
-    def table_z_mm(self, machine_z_mm: float) -> float:
-        return self.MeasuredSensorZ_mm + (machine_z_mm - self.ZStart_machine_mm)
+    def placement_notes(self) -> str:
+        return (
+            f"MeasuredSensorY={self.MeasuredSensorY_mm:g}mm after "
+            f"{self.MeasuredFrom} at machine Y={self.YStart_machine_mm:g}mm; "
+            f"BeamDirectionSign={self.BeamDirectionSign:+d} (machine +Y "
+            f"{'away from' if self.BeamDirectionSign > 0 else 'toward'} "
+            "the optic)"
+        )
 
 
-def z_subfolder_name(table_z_mm: float) -> str:
+def y_subfolder_name(beam_y_mm: float) -> str:
     """
-    Zero-padded, lexically sortable z folder name, e.g. 'z0100.00cm'.
+    Zero-padded, lexically sortable slice folder name from the distance
+    along the beam, e.g. 'y0100.00cm'.
     """
-    return f"z{table_z_mm / 10.0:07.2f}cm"
+    return f"y{beam_y_mm / 10.0:07.2f}cm"
 
 
 # ---------------------------------------------------------------------------
@@ -236,8 +238,9 @@ def set_exposure_us(cam, exposure_us: float) -> float:
 
 class AutoScanSession:
     """
-    Drives one placement's Z stack through an already-prepared
-    FLIRDatasetWriter whose stage_controller is a FluidNCStageController.
+    Drives one placement's beam stack (XZ slices stepped along Y) through
+    an already-prepared FLIRDatasetWriter whose stage_controller is a
+    FluidNCStageController.
     """
 
     def __init__(
@@ -252,7 +255,6 @@ class AutoScanSession:
         self.calibration_config = calibration_config
         self.pause_fn = pause_fn or (lambda message: input(f"{message}\nPress ENTER... "))
 
-        self.placement = config.placement()
         self.records = []
         self.calibrations: dict[str, HeadlessCalibrationResult] = {}
 
@@ -260,79 +262,99 @@ class AutoScanSession:
         # actually captured, consulted before capturing the next one.
         self._last_background: Optional[dict[str, Any]] = None
 
-    # -- motion --------------------------------------------------------
+    # -- geometry -------------------------------------------------------
 
-    def _move_to(self, x_mm: float, y_mm: float, z_mm: float) -> None:
-        point = ScanPoint(
-            PlacementID=self.placement.PlacementID,
-            GantryPosition_mm=Vec3D(x_mm=x_mm, y_mm=y_mm, z_mm=z_mm),
-            TablePosition_mm=self.placement.gantry_to_table(
-                Vec3D(x_mm=x_mm, y_mm=y_mm, z_mm=z_mm)
-            ),
+    def table_position(self, x_mm: float, machine_y_mm: float, z_mm: float) -> Vec3D:
+        """
+        Table coordinates: identical to machine coordinates except Y, which
+        is anchored to the distance from the reference optic.
+        """
+
+        return Vec3D(
+            x_mm=x_mm,
+            y_mm=self.config.beam_y_mm(machine_y_mm),
+            z_mm=z_mm,
         )
-        self.writer._move_and_wait(point)
+
+    def _make_point(
+        self,
+        x_mm: float,
+        machine_y_mm: float,
+        z_mm: float,
+        nshots: int = 1,
+        metadata: Optional[dict[str, Any]] = None,
+    ) -> ScanPoint:
+        return ScanPoint(
+            PlacementID=self.config.PlacementID,
+            GantryPosition_mm=Vec3D(x_mm=x_mm, y_mm=machine_y_mm, z_mm=z_mm),
+            TablePosition_mm=self.table_position(x_mm, machine_y_mm, z_mm),
+            NShots=nshots,
+            Metadata=metadata or {},
+        )
+
+    def _move_to(self, x_mm: float, machine_y_mm: float, z_mm: float) -> None:
+        self.writer._move_and_wait(self._make_point(x_mm, machine_y_mm, z_mm))
 
     # -- backgrounds ----------------------------------------------------
 
-    def background_xy(self, machine_limits) -> tuple[float, float]:
+    def background_xz(self, machine_limits) -> tuple[float, float]:
         """
-        Off-axis background position: explicit config values if given,
-        otherwise the machine-limit corner farthest from the calibration
-        point (i.e. as far from the beam as this placement allows).
+        Off-axis background position in the X-Z cross-section plane:
+        explicit config values if given, otherwise the machine-limit X/Z
+        corner farthest from the calibration point (as far from the beam
+        as this placement allows).
         """
 
         if (
             self.config.BackgroundX_mm is not None
-            and self.config.BackgroundY_mm is not None
+            and self.config.BackgroundZ_mm is not None
         ):
-            return self.config.BackgroundX_mm, self.config.BackgroundY_mm
+            return self.config.BackgroundX_mm, self.config.BackgroundZ_mm
 
-        calib_x, calib_y = self.config.calibration_xy()
+        calib_x, calib_z = self.config.calibration_xz()
 
         corners = [
-            (machine_limits.x_min_mm, machine_limits.y_min_mm),
-            (machine_limits.x_min_mm, machine_limits.y_max_mm),
-            (machine_limits.x_max_mm, machine_limits.y_min_mm),
-            (machine_limits.x_max_mm, machine_limits.y_max_mm),
+            (machine_limits.x_min_mm, machine_limits.z_min_mm),
+            (machine_limits.x_min_mm, machine_limits.z_max_mm),
+            (machine_limits.x_max_mm, machine_limits.z_min_mm),
+            (machine_limits.x_max_mm, machine_limits.z_max_mm),
         ]
 
         return max(
             corners,
-            key=lambda c: (c[0] - calib_x) ** 2 + (c[1] - calib_y) ** 2,
+            key=lambda c: (c[0] - calib_x) ** 2 + (c[1] - calib_z) ** 2,
         )
 
     def capture_background_offaxis(
         self,
-        machine_z_mm: float,
+        machine_y_mm: float,
         exposure_us: float,
         machine_limits,
-        z_name: str,
+        y_name: str,
     ) -> list:
         """
-        Move the camera out of the beam and capture ambient backgrounds at
-        this slice's already-applied calibrated exposure. Frames land in the
-        slice's own z subfolder, tagged as backgrounds.
+        Move the camera out of the beam (in X/Z) and capture ambient
+        backgrounds at this slice's already-applied calibrated exposure.
+        Frames land in the slice's own subfolder, tagged as backgrounds.
         """
 
-        bg_x, bg_y = self.background_xy(machine_limits)
-        self._move_to(bg_x, bg_y, machine_z_mm)
+        bg_x, bg_z = self.background_xz(machine_limits)
+        self._move_to(bg_x, machine_y_mm, bg_z)
 
-        point = ScanPoint(
-            PlacementID=self.placement.PlacementID,
-            GantryPosition_mm=Vec3D(bg_x, bg_y, machine_z_mm),
-            TablePosition_mm=self.placement.gantry_to_table(
-                Vec3D(bg_x, bg_y, machine_z_mm)
-            ),
-            NShots=self.config.BackgroundShots,
-            Metadata={
+        point = self._make_point(
+            bg_x,
+            machine_y_mm,
+            bg_z,
+            nshots=self.config.BackgroundShots,
+            metadata={
                 "ScanKind": "Background",
                 "BackgroundMode": "OffAxisAmbient",
-                "Subfolder": z_name,
+                "Subfolder": y_name,
                 "FileTag": "background",
                 "Exposure_us": exposure_us,
-                "MachineZ_mm": machine_z_mm,
-                "TableZ_mm": self.config.table_z_mm(machine_z_mm),
-                "SensorZReference": self.config.SensorZReference,
+                "MachineY_mm": machine_y_mm,
+                "BeamY_mm": self.config.beam_y_mm(machine_y_mm),
+                "MeasuredFrom": self.config.MeasuredFrom,
                 **self.config.Metadata,
             },
         )
@@ -343,17 +365,17 @@ class AutoScanSession:
 
     def background_for_slice(
         self,
-        machine_z_mm: float,
+        machine_y_mm: float,
         exposure_us: float,
         machine_limits,
-        z_name: str,
+        y_name: str,
     ) -> list:
         """
         Off-axis background with change-based cadence: capture a fresh
         background only when the calibrated exposure moved by at least
         BackgroundExposureChangeFraction since the last captured one;
         otherwise reuse it. Either way, background_reference.json in the
-        z folder records which background frames apply to this slice.
+        slice folder records which background frames apply to this slice.
         """
 
         last = self._last_background
@@ -371,17 +393,17 @@ class AutoScanSession:
 
         if must_capture:
             records = self.capture_background_offaxis(
-                machine_z_mm, exposure_us, machine_limits, z_name
+                machine_y_mm, exposure_us, machine_limits, y_name
             )
 
             self._last_background = {
                 "Exposure_us": exposure_us,
                 "Records": records,
-                "ZName": z_name,
-                "MachineZ_mm": machine_z_mm,
+                "SliceName": y_name,
+                "MachineY_mm": machine_y_mm,
             }
 
-            bg_x, bg_y = self.background_xy(machine_limits)
+            bg_x, bg_z = self.background_xz(machine_limits)
             reason = (
                 "first slice"
                 if change is None
@@ -389,40 +411,40 @@ class AutoScanSession:
             )
             logger.info(
                 f"{len(records)} off-axis background frame(s) at "
-                f"X{bg_x:g} Y{bg_y:g} ({reason})"
+                f"X{bg_x:g} Z{bg_z:g} ({reason})"
             )
         else:
             records = last["Records"]
             logger.info(
-                f"reusing background from {last['ZName']}/ "
+                f"reusing background from {last['SliceName']}/ "
                 f"(exposure changed {change * 100.0:.1f}% < "
                 f"{self.config.BackgroundExposureChangeFraction * 100.0:g}%)"
             )
 
         self._write_background_reference(
-            z_name, exposure_us, change, captured=must_capture
+            y_name, exposure_us, change, captured=must_capture
         )
 
         return records
 
     def _write_background_reference(
         self,
-        z_name: str,
+        y_name: str,
         exposure_us: float,
         change: Optional[float],
         captured: bool,
     ) -> None:
         last = self._last_background
 
-        z_dir = self.writer.run_dir / z_name
-        z_dir.mkdir(parents=True, exist_ok=True)
+        slice_dir = self.writer.run_dir / y_name
+        slice_dir.mkdir(parents=True, exist_ok=True)
 
         payload = {
             "Reused": not captured,
             "SliceExposure_us": exposure_us,
             "BackgroundExposure_us": last["Exposure_us"],
-            "BackgroundZ": last["ZName"],
-            "BackgroundMachineZ_mm": last["MachineZ_mm"],
+            "BackgroundSlice": last["SliceName"],
+            "BackgroundMachineY_mm": last["MachineY_mm"],
             "ExposureChangeFraction": change,
             "MaxExposureChangeFraction": (
                 self.config.BackgroundExposureChangeFraction
@@ -432,7 +454,7 @@ class AutoScanSession:
             ],
         }
 
-        (z_dir / "background_reference.json").write_text(
+        (slice_dir / "background_reference.json").write_text(
             json.dumps(payload, indent=2) + "\n"
         )
 
@@ -441,8 +463,8 @@ class AutoScanSession:
     def capture_background_ladder(self) -> list:
         exposures = self.config.BackgroundExposures_us or default_background_ladder_us()
 
-        calib_x, calib_y = self.config.calibration_xy()
-        self._move_to(calib_x, calib_y, self.config.ZStart_machine_mm)
+        calib_x, calib_z = self.config.calibration_xz()
+        self._move_to(calib_x, self.config.YStart_machine_mm, calib_z)
 
         self.pause_fn(
             "BLOCK THE BEAM now (backgrounds for this placement are about to "
@@ -454,20 +476,18 @@ class AutoScanSession:
         for rung_idx, exposure_us in enumerate(exposures):
             actual_us = set_exposure_us(self.writer.cam, exposure_us)
 
-            point = ScanPoint(
-                PlacementID=self.placement.PlacementID,
-                GantryPosition_mm=Vec3D(calib_x, calib_y, self.config.ZStart_machine_mm),
-                TablePosition_mm=self.placement.gantry_to_table(
-                    Vec3D(calib_x, calib_y, self.config.ZStart_machine_mm)
-                ),
-                NShots=self.config.BackgroundShots,
-                Metadata={
+            point = self._make_point(
+                calib_x,
+                self.config.YStart_machine_mm,
+                calib_z,
+                nshots=self.config.BackgroundShots,
+                metadata={
                     "ScanKind": "Background",
                     "Subfolder": BACKGROUND_SUBFOLDER,
                     "FileTag": f"exp{actual_us:09.1f}us",
                     "Exposure_us": actual_us,
                     "LadderIndex": rung_idx,
-                    "SensorZReference": self.config.SensorZReference,
+                    "MeasuredFrom": self.config.MeasuredFrom,
                     **self.config.Metadata,
                 },
             )
@@ -483,15 +503,15 @@ class AutoScanSession:
         self.records.extend(records)
         return records
 
-    # -- step 3: per-z calibration -------------------------------------
+    # -- per-slice calibration -----------------------------------------
 
     def calibrate_at(
         self,
-        machine_z_mm: float,
+        machine_y_mm: float,
         start_exposure_us: float,
     ) -> HeadlessCalibrationResult:
-        calib_x, calib_y = self.config.calibration_xy()
-        self._move_to(calib_x, calib_y, machine_z_mm)
+        calib_x, calib_z = self.config.calibration_xz()
+        self._move_to(calib_x, machine_y_mm, calib_z)
 
         timeout_ms = self.writer.config.AcquisitionTimeout_ms
 
@@ -507,20 +527,20 @@ class AutoScanSession:
         finally:
             self.writer._end_acquisition()
 
-        self._save_calibration(machine_z_mm, result)
+        self._save_calibration(machine_y_mm, result)
         return result
 
     def _save_calibration(
-        self, machine_z_mm: float, result: HeadlessCalibrationResult
+        self, machine_y_mm: float, result: HeadlessCalibrationResult
     ) -> None:
-        table_z_mm = self.config.table_z_mm(machine_z_mm)
-        z_dir = self.writer.run_dir / z_subfolder_name(table_z_mm)
-        z_dir.mkdir(parents=True, exist_ok=True)
+        beam_y_mm = self.config.beam_y_mm(machine_y_mm)
+        slice_dir = self.writer.run_dir / y_subfolder_name(beam_y_mm)
+        slice_dir.mkdir(parents=True, exist_ok=True)
 
         payload = {
-            "MachineZ_mm": machine_z_mm,
-            "TableZ_mm": table_z_mm,
-            "SensorZReference": self.config.SensorZReference,
+            "MachineY_mm": machine_y_mm,
+            "BeamY_mm": beam_y_mm,
+            "MeasuredFrom": self.config.MeasuredFrom,
             "FinalExposure_us": result.FinalExposure_us,
             "LastMax": result.LastMax,
             "LastSaturatedPixels": result.LastSaturatedPixels,
@@ -529,7 +549,7 @@ class AutoScanSession:
             "Note": result.Note,
         }
 
-        (z_dir / "calibration_result.json").write_text(
+        (slice_dir / "calibration_result.json").write_text(
             json.dumps(payload, indent=2) + "\n"
         )
 
@@ -540,42 +560,37 @@ class AutoScanSession:
             calibrated = dataclass_replace(
                 settings, ExposureTime=result.FinalExposure_us
             )
-            calibrated.to_json_file(z_dir / "calibrated_camera_settings.json")
+            calibrated.to_json_file(slice_dir / "calibrated_camera_settings.json")
 
-        self.calibrations[z_subfolder_name(table_z_mm)] = result
+        self.calibrations[y_subfolder_name(beam_y_mm)] = result
 
-    # -- steps 3-5: the Z stack ----------------------------------------
+    # -- the beam stack -------------------------------------------------
 
-    def run_z_stack(self, machine_limits) -> list:
+    def run_y_stack(self, machine_limits) -> list:
         """
-        For each machine Z: headless exposure calibration, then the XY
-        raster. machine_limits is the Bounds3D the stage controller
-        enforces (pass FluidNCStageController.config.MachineLimits_mm).
+        For each machine Y: headless exposure calibration, background (if
+        offaxis mode), then the X-Z cross-section raster. machine_limits is
+        the Bounds3D the stage controller enforces (pass
+        FluidNCStageController.config.MachineLimits_mm).
         """
 
-        z_values = self.config.z_values_machine_mm()
-        roi = Bounds2D(
-            x_min_mm=self.config.X.start_mm,
-            x_max_mm=self.config.X.stop_mm,
-            y_min_mm=self.config.Y.start_mm,
-            y_max_mm=self.config.Y.stop_mm,
-        )
+        y_values = self.config.y_values_machine_mm()
 
         exposure_seed_us = getattr(
             self.writer.camera_settings, "ExposureTime", None
         ) or 1000.0
 
-        for z_idx, machine_z in enumerate(z_values):
-            table_z_mm = self.config.table_z_mm(machine_z)
-            z_name = z_subfolder_name(table_z_mm)
+        for y_idx, machine_y in enumerate(y_values):
+            beam_y_mm = self.config.beam_y_mm(machine_y)
+            y_name = y_subfolder_name(beam_y_mm)
 
             logger.info(
-                f"[{z_idx + 1}/{len(z_values)}] machine Z {machine_z:g} mm "
-                f"(table z = {table_z_mm / 10.0:g} cm after "
-                f"{self.config.SensorZReference}) -> {z_name}/"
+                f"[{y_idx + 1}/{len(y_values)}] machine Y {machine_y:g} mm "
+                f"(beam y = {beam_y_mm / 10.0:g} cm after "
+                f"{self.config.MeasuredFrom}) -> {y_name}/"
             )
 
-            calibration = self.calibrate_at(machine_z, exposure_seed_us)
+            calibration = self.calibrate_at(machine_y, exposure_seed_us)
             exposure_seed_us = calibration.FinalExposure_us
 
             logger.info(
@@ -589,66 +604,86 @@ class AutoScanSession:
 
             if self.config.BackgroundMode == "offaxis":
                 background_records = self.background_for_slice(
-                    machine_z,
+                    machine_y,
                     calibration.FinalExposure_us,
                     machine_limits,
-                    z_name,
+                    y_name,
                 )
 
             point_metadata = {
-                "ScanKind": "AutoZStack",
-                "Subfolder": z_name,
-                "MachineZ_mm": machine_z,
-                "TableZ_mm": table_z_mm,
-                "SensorZReference": self.config.SensorZReference,
+                "ScanKind": "AutoBeamStack",
+                "Subfolder": y_name,
+                "MachineY_mm": machine_y,
+                "BeamY_mm": beam_y_mm,
+                "MeasuredFrom": self.config.MeasuredFrom,
                 "Exposure_us": calibration.FinalExposure_us,
                 **self.config.Metadata,
             }
 
             if self.config.RasterMode == "adaptive":
                 records, raster_metadata = self._run_adaptive_raster(
-                    machine_z,
+                    machine_y,
                     machine_limits,
                     background_records,
                     point_metadata,
                 )
             else:
-                plan = XYCrossSectionPlan(
-                    Placement=self.placement,
-                    MachineLimits=machine_limits,
-                    ROI=roi,
-                    GantryZ_mm=machine_z,
-                    X=self.config.X,
-                    Y=self.config.Y,
-                    NShots=self.config.NShots,
-                    Metadata=point_metadata,
+                points = self._fixed_grid_points(
+                    machine_y, machine_limits, point_metadata
                 )
-
-                points = plan.generate_points()
                 records = self.writer.acquire_scan(points)
 
                 raster_metadata = {
                     "RasterMode": "fixed",
-                    "Step_mm": [self.config.X.step_mm, self.config.Y.step_mm],
+                    "Step_mm": [self.config.X.step_mm, self.config.Z.step_mm],
                     "GridShape": [
                         len(self.config.X.values()),
-                        len(self.config.Y.values()),
+                        len(self.config.Z.values()),
                     ],
                     "FinalRect_mm": {
                         "XMin": self.config.X.start_mm,
                         "XMax": self.config.X.stop_mm,
-                        "YMin": self.config.Y.start_mm,
-                        "YMax": self.config.Y.stop_mm,
+                        "ZMin": self.config.Z.start_mm,
+                        "ZMax": self.config.Z.stop_mm,
                     },
                     "CellsCaptured": len(points),
                 }
 
             self.records.extend(records)
-            self._write_raster_metadata(z_name, machine_z, raster_metadata)
+            self._write_raster_metadata(y_name, machine_y, raster_metadata)
 
-            logger.info(f"{len(records)} frames -> {z_name}/")
+            logger.info(f"{len(records)} frames -> {y_name}/")
 
         return self.records
+
+    def _fixed_grid_points(
+        self,
+        machine_y_mm: float,
+        machine_limits,
+        point_metadata: dict,
+    ) -> list[ScanPoint]:
+        points = []
+
+        for z_mm in self.config.Z.values():
+            for x_mm in self.config.X.values():
+                position = Vec3D(x_mm=x_mm, y_mm=machine_y_mm, z_mm=z_mm)
+
+                if not machine_limits.contains(position):
+                    raise ValueError(
+                        f"Raster point outside machine limits: {position}"
+                    )
+
+                points.append(
+                    self._make_point(
+                        x_mm,
+                        machine_y_mm,
+                        z_mm,
+                        nshots=self.config.NShots,
+                        metadata=point_metadata,
+                    )
+                )
+
+        return points
 
     # -- adaptive raster ------------------------------------------------
 
@@ -682,29 +717,31 @@ class AutoScanSession:
 
     def _run_adaptive_raster(
         self,
-        machine_z_mm: float,
+        machine_y_mm: float,
         machine_limits,
         background_records,
         point_metadata: dict,
     ) -> tuple[list, dict]:
         threshold, threshold_source = self.signal_threshold(background_records)
-        calib_x, calib_y = self.config.calibration_xy()
+        calib_x, calib_z = self.config.calibration_xz()
 
-        # Caps: the configured X/Y ranges, further clamped to machine limits.
+        # Caps: the configured X/Z ranges, further clamped to machine
+        # limits. In the raster lattice, lattice-x = machine X and
+        # lattice-y = machine Z (the cross-section plane).
         x_min = max(self.config.X.start_mm, machine_limits.x_min_mm)
         x_max = min(self.config.X.stop_mm, machine_limits.x_max_mm)
-        y_min = max(self.config.Y.start_mm, machine_limits.y_min_mm)
-        y_max = min(self.config.Y.stop_mm, machine_limits.y_max_mm)
+        z_min = max(self.config.Z.start_mm, machine_limits.z_min_mm)
+        z_max = min(self.config.Z.stop_mm, machine_limits.z_max_mm)
 
         raster_config = AdaptiveRasterConfig(
             CenterX_mm=calib_x,
-            CenterY_mm=calib_y,
+            CenterY_mm=calib_z,
             StepX_mm=self.config.X.step_mm,
-            StepY_mm=self.config.Y.step_mm,
+            StepY_mm=self.config.Z.step_mm,
             XMin_mm=x_min,
             XMax_mm=x_max,
-            YMin_mm=y_min,
-            YMax_mm=y_max,
+            YMin_mm=z_min,
+            YMax_mm=z_max,
             SignalThreshold_counts=threshold,
             MinSignalPixels=self.config.MinSignalPixels,
             BorderStripFraction=self.config.BorderStripFraction,
@@ -714,15 +751,13 @@ class AutoScanSession:
             ImageFlipY=self.config.ImageFlipY,
         )
 
-        def capture(x_mm: float, y_mm: float, i: int, j: int):
-            point = ScanPoint(
-                PlacementID=self.placement.PlacementID,
-                GantryPosition_mm=Vec3D(x_mm, y_mm, machine_z_mm),
-                TablePosition_mm=self.placement.gantry_to_table(
-                    Vec3D(x_mm, y_mm, machine_z_mm)
-                ),
-                NShots=self.config.NShots,
-                Metadata={**point_metadata, "GridI": i, "GridJ": j},
+        def capture(x_mm: float, z_mm: float, i: int, j: int):
+            point = self._make_point(
+                x_mm,
+                machine_y_mm,
+                z_mm,
+                nshots=self.config.NShots,
+                metadata={**point_metadata, "GridI": i, "GridJ": j},
             )
 
             records = self.writer.acquire_scan([point])
@@ -734,6 +769,9 @@ class AutoScanSession:
 
         metadata = result.Metadata
         metadata["SignalThresholdSource"] = threshold_source
+        # The runner's lattice is axis-agnostic; record what its axes mean
+        # here so BorderSignal/FinalRect keys are unambiguous.
+        metadata["LatticeAxes"] = {"x": "machine X", "y": "machine Z"}
 
         logger.info(
             f"adaptive raster: {metadata['CellsCaptured']} cells "
@@ -744,18 +782,18 @@ class AutoScanSession:
         return result.Records, metadata
 
     def _write_raster_metadata(
-        self, z_name: str, machine_z_mm: float, metadata: dict
+        self, y_name: str, machine_y_mm: float, metadata: dict
     ) -> None:
-        z_dir = self.writer.run_dir / z_name
-        z_dir.mkdir(parents=True, exist_ok=True)
+        slice_dir = self.writer.run_dir / y_name
+        slice_dir.mkdir(parents=True, exist_ok=True)
 
         payload = {
-            "MachineZ_mm": machine_z_mm,
-            "TableZ_mm": self.config.table_z_mm(machine_z_mm),
+            "MachineY_mm": machine_y_mm,
+            "BeamY_mm": self.config.beam_y_mm(machine_y_mm),
             **metadata,
         }
 
-        (z_dir / "raster_metadata.json").write_text(
+        (slice_dir / "raster_metadata.json").write_text(
             json.dumps(payload, indent=2) + "\n"
         )
 
@@ -764,23 +802,32 @@ class AutoScanSession:
     def run(self, machine_limits) -> list:
         setup = {
             "PlacementID": self.config.PlacementID,
-            "MeasuredSensorZ_mm": self.config.MeasuredSensorZ_mm,
-            "SensorZReference": self.config.SensorZReference,
-            "ZStart_machine_mm": self.config.ZStart_machine_mm,
-            "ZStop_machine_mm": self.config.ZStop_machine_mm,
-            "ZStep_mm": self.config.ZStep_mm,
+            "CoordinateConvention": (
+                "X horizontal transverse, Y beam propagation, Z vertical; "
+                "machine == table except TableY, anchored to the optic."
+            ),
+            "MeasuredSensorY_mm": self.config.MeasuredSensorY_mm,
+            "MeasuredFrom": self.config.MeasuredFrom,
+            "YStart_machine_mm": self.config.YStart_machine_mm,
+            "YStop_machine_mm": self.config.YStop_machine_mm,
+            "YStep_mm": self.config.YStep_mm,
+            "BeamDirectionSign": self.config.BeamDirectionSign,
             "X": self.config.X,
-            "Y": self.config.Y,
+            "Z": self.config.Z,
+            "RasterMode": self.config.RasterMode,
             "NShots": self.config.NShots,
             "BackgroundMode": self.config.BackgroundMode,
             "BackgroundShots": self.config.BackgroundShots,
             "Metadata": self.config.Metadata,
-            "PlacementNotes": self.placement.Notes,
+            "PlacementNotes": self.config.placement_notes(),
         }
 
         if self.config.BackgroundMode == "offaxis":
-            bg_x, bg_y = self.background_xy(machine_limits)
-            setup["BackgroundXY_mm"] = [bg_x, bg_y]
+            bg_x, bg_z = self.background_xz(machine_limits)
+            setup["BackgroundXZ_mm"] = [bg_x, bg_z]
+            setup["BackgroundExposureChangeFraction"] = (
+                self.config.BackgroundExposureChangeFraction
+            )
 
         if self.config.BackgroundMode == "ladder":
             setup["BackgroundExposures_us"] = list(
@@ -793,4 +840,4 @@ class AutoScanSession:
         if self.config.BackgroundMode == "ladder":
             self.capture_background_ladder()
 
-        return self.run_z_stack(machine_limits)
+        return self.run_y_stack(machine_limits)
