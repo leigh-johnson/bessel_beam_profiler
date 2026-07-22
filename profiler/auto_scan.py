@@ -246,13 +246,11 @@ class AutoScanSession:
         config: AutoScanConfig,
         calibration_config: HeadlessCalibrationConfig = HeadlessCalibrationConfig(),
         pause_fn: Callable[[str], None] = None,
-        echo_fn: Callable[[str], None] = print,
     ):
         self.writer = writer
         self.config = config
         self.calibration_config = calibration_config
         self.pause_fn = pause_fn or (lambda message: input(f"{message}\nPress ENTER... "))
-        self.echo = echo_fn
 
         self.placement = config.placement()
         self.records = []
@@ -389,14 +387,14 @@ class AutoScanSession:
                 if change is None
                 else f"exposure changed {change * 100.0:.1f}%"
             )
-            self.echo(
-                f"    {len(records)} off-axis background frame(s) at "
+            logger.info(
+                f"{len(records)} off-axis background frame(s) at "
                 f"X{bg_x:g} Y{bg_y:g} ({reason})"
             )
         else:
             records = last["Records"]
-            self.echo(
-                f"    reusing background from {last['ZName']}/ "
+            logger.info(
+                f"reusing background from {last['ZName']}/ "
                 f"(exposure changed {change * 100.0:.1f}% < "
                 f"{self.config.BackgroundExposureChangeFraction * 100.0:g}%)"
             )
@@ -475,8 +473,8 @@ class AutoScanSession:
             )
 
             records.extend(self.writer.acquire_at_current_position(point))
-            self.echo(
-                f"  background {rung_idx + 1}/{len(exposures)}: "
+            logger.info(
+                f"background ladder {rung_idx + 1}/{len(exposures)}: "
                 f"{actual_us:.1f} us x {self.config.BackgroundShots} shots"
             )
 
@@ -571,7 +569,7 @@ class AutoScanSession:
             table_z_mm = self.config.table_z_mm(machine_z)
             z_name = z_subfolder_name(table_z_mm)
 
-            self.echo(
+            logger.info(
                 f"[{z_idx + 1}/{len(z_values)}] machine Z {machine_z:g} mm "
                 f"(table z = {table_z_mm / 10.0:g} cm after "
                 f"{self.config.SensorZReference}) -> {z_name}/"
@@ -580,8 +578,8 @@ class AutoScanSession:
             calibration = self.calibrate_at(machine_z, exposure_seed_us)
             exposure_seed_us = calibration.FinalExposure_us
 
-            self.echo(
-                f"    exposure {calibration.FinalExposure_us:.1f} us "
+            logger.info(
+                f"exposure {calibration.FinalExposure_us:.1f} us "
                 f"(max {calibration.LastMax}, "
                 f"saturated {calibration.LastSaturatedPixels}, "
                 f"converged={calibration.Converged})"
@@ -648,7 +646,7 @@ class AutoScanSession:
             self.records.extend(records)
             self._write_raster_metadata(z_name, machine_z, raster_metadata)
 
-            self.echo(f"    {len(records)} frames -> {z_name}/")
+            logger.info(f"{len(records)} frames -> {z_name}/")
 
         return self.records
 
@@ -731,18 +729,14 @@ class AutoScanSession:
             arr = np.load(records[0].Path)
             return records, arr
 
-        runner = AdaptiveRasterRunner(
-            raster_config,
-            capture,
-            echo_fn=lambda message: self.echo(f"    {message}"),
-        )
+        runner = AdaptiveRasterRunner(raster_config, capture)
         result = runner.run()
 
         metadata = result.Metadata
         metadata["SignalThresholdSource"] = threshold_source
 
-        self.echo(
-            f"    adaptive raster: {metadata['CellsCaptured']} cells "
+        logger.info(
+            f"adaptive raster: {metadata['CellsCaptured']} cells "
             f"(grid {metadata['GridShape'][0]}x{metadata['GridShape'][1]}) "
             f"vs {metadata['FixedGridCells']} for the full fixed grid"
         )

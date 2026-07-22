@@ -149,7 +149,6 @@ class AdaptiveRasterRunner:
         self,
         config: AdaptiveRasterConfig,
         capture_fn: CaptureFn,
-        echo_fn: Callable[[str], None] = None,
     ):
         if config.BorderTest not in ("any", "directional"):
             raise AdaptiveRasterError(
@@ -159,7 +158,6 @@ class AdaptiveRasterRunner:
 
         self.config = config
         self.capture_fn = capture_fn
-        self.echo = echo_fn or (lambda message: None)
 
         self.cells: dict[tuple[int, int], CellResult] = {}
         self.capture_order: list[tuple[int, int]] = []
@@ -206,14 +204,12 @@ class AdaptiveRasterRunner:
             largest = max(strip.size for strip in strips.values())
 
             if largest < self.config.MinSignalPixels:
-                message = (
+                logger.warning(
                     f"MinSignalPixels ({self.config.MinSignalPixels}) exceeds "
                     f"every border-strip size (largest {largest} px): the "
                     "raster can NEVER grow. Lower MinSignalPixels or raise "
                     "BorderStripFraction."
                 )
-                logger.warning(message)
-                self.echo(message)
         strip_signal = {
             name: self._strip_has_signal(strip) for name, strip in strips.items()
         }
@@ -354,13 +350,11 @@ class AdaptiveRasterRunner:
         truncated_sides = [s for s, why in edge_stops.items() if why == "cap"]
 
         for side in truncated_sides:
-            message = (
+            logger.warning(
                 f"ADAPTIVE RASTER TRUNCATED on {side}: the beam still had "
                 "signal at the configured X/Y cap. Widen the cap (or accept "
                 "reduced coverage)."
             )
-            logger.warning(message)
-            self.echo(message)
 
         i0, i1, j0, j1 = rect
         i_min, i_max, j_min, j_max = caps
@@ -372,7 +366,7 @@ class AdaptiveRasterRunner:
         single_frame = len(cells_in_order) == 1
 
         if single_frame:
-            self.echo(
+            logger.info(
                 "Beam fits entirely within a single camera frame at this "
                 "z-slice; raster complete after 1 position."
             )

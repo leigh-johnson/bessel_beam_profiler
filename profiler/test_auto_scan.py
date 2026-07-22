@@ -192,7 +192,6 @@ def make_session(
         writer,
         config,
         pause_fn=pauses.append,
-        echo_fn=lambda message: None,
     )
     return session, writer, pauses
 
