@@ -154,6 +154,17 @@ def resolve_scan_caps(limits, x_min, x_max, z_min, z_max):
 @click.option("--background-max-us", default=100000.0, show_default=True, type=float, help="Ladder mode only.")
 @click.option("--background-count", default=10, show_default=True, type=click.IntRange(min=2), help="Ladder mode only.")
 @click.option("--skip-background", is_flag=True, help="Shorthand for --background-mode none.")
+# -- notifications ----------------------------------------------------------
+@click.option(
+    "--slack-webhook",
+    "slack_webhook",
+    envvar="SLACK_WEBHOOK_URL",
+    default=None,
+    show_envvar=True,
+    help="Slack incoming-webhook URL (a secret — prefer the env var over "
+    "the flag). Pings the webhook's channel when each placement finishes "
+    "and the gantry is ready to be repositioned, and on scan failure.",
+)
 # -- misc -------------------------------------------------------------------
 @click.option("--metadata", multiple=True, help="Extra manifest metadata as KEY=VALUE. May be repeated.")
 @click.option("--skip-homing", is_flag=True, help="Skip $H (only if already homed THIS power-cycle and placement).")
@@ -194,6 +205,7 @@ def auto_scan(
     background_max_us: float,
     background_count: int,
     skip_background: bool,
+    slack_webhook,
     metadata,
     skip_homing: bool,
 ) -> None:
@@ -307,6 +319,7 @@ def auto_scan(
     )
 
     placement_number = 1
+    current_placement_id = None
 
     try:
         while True:
@@ -327,6 +340,7 @@ def auto_scan(
                 default=f"placement-{placement_number:02d}",
                 show_default=True,
             )
+            current_placement_id = placement_id
 
             click.echo(
                 f"\nMeasure the distance from the optic to the camera sensor "
@@ -453,8 +467,28 @@ def auto_scan(
                 logger.info(
                     f"Placement done: {len(records)} frames in {run_dir}"
                 )
+            except Exception as ex:
+                if slack_webhook:
+                    from notify import send_slack_message
+
+                    send_slack_message(
+                        f":rotating_light: Scan with placement ID "
+                        f"`{placement_id}` FAILED: {ex}",
+                        slack_webhook,
+                    )
+                raise
             finally:
                 remove_file_log(log_handler)
+
+            if slack_webhook:
+                from notify import send_slack_message
+
+                send_slack_message(
+                    f":bell: Scan with placement ID `{placement_id}` "
+                    f"finished. {len(records)} frames in `{run_dir.name}` — "
+                    "the gantry is ready to be repositioned.",
+                    slack_webhook,
+                )
 
             # Release the camera before the next placement (PySpin cleanup).
             del session
@@ -481,6 +515,16 @@ def auto_scan(
             client.feed_hold()
         except Exception as ex:  # noqa: BLE001 - best-effort safety stop
             click.echo(f"Feed hold failed: {ex}")
+
+        if slack_webhook:
+            from notify import send_slack_message
+
+            which = f" `{current_placement_id}`" if current_placement_id else ""
+            send_slack_message(
+                f":warning: Scan{which} interrupted — gantry is in feed "
+                "hold.",
+                slack_webhook,
+            )
         click.echo(
             "Machine is holding. Resume from the WebUI (~) or re-home with "
             "'python cli.py gantry home'."
