@@ -11,6 +11,7 @@ import importlib
 import json
 import sys
 import types
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -52,6 +53,7 @@ def make_writer(modules, tmp_path, images, job_type="auto_scan", **config_kwargs
         config=modules.dataset_writer.DatasetWriterConfig(
             JobType=job_type,
             DatasetRoot=tmp_path,
+            TriggerArmDelay_s=0.0,  # keep the fake-camera tests fast
             **config_kwargs,
         ),
         stage_controller=FastStageController(),
@@ -164,6 +166,7 @@ def make_session(
     background_exposure_change=0.0,  # most tests: capture at every slice
     raster_mode="fixed",
     min_signal_pixels=50,
+    find_beam=False,  # legacy tests pre-date the sweep; explicit tests opt in
     images=None,
 ):
     if images is None:
@@ -180,11 +183,13 @@ def make_session(
         YStart_machine_mm=20.0,
         YStop_machine_mm=30.0,
         YStep_mm=10.0,  # -> machine Y 20, 30 -> beam y 100 cm, 101 cm
+        BeamDirectionSign=1,  # tests use +Y = downstream for simple sums
         X=modules.coordinates.AxisRange(start_mm=55.0, stop_mm=60.0, step_mm=5.0),
         Z=modules.coordinates.AxisRange(start_mm=-80.0, stop_mm=-80.0, step_mm=5.0),
         NShots=1,
         RasterMode=raster_mode,
         MinSignalPixels=min_signal_pixels,
+        FindBeam=find_beam,
         BackgroundMode=background_mode,
         BackgroundX_mm=background_x_mm,
         BackgroundZ_mm=background_z_mm,
@@ -545,6 +550,65 @@ def test_adaptive_raster_single_frame_beam_end_to_end(modules, tmp_path):
         assert record["GantryPosition_mm"]["y_mm"] in (20.0, 30.0)
 
 
+def test_dark_perimeter_frames_are_relabeled_on_disk(modules, tmp_path):
+    # Seed frame has signal to every border -> one growth ring of 8 dark
+    # cells -> stop. The 8 proof-of-darkness frames must be renamed with
+    # the -dark suffix, with manifests and raster metadata following.
+    images = [FakeImage(np.full((12, 16), 150, dtype=np.uint8))]  # calibration
+    images.append(FakeImage(np.full((12, 16), 150, dtype=np.uint8)))  # seed
+    images.extend(
+        FakeImage(np.full((12, 16), 2, dtype=np.uint8)) for _ in range(8)
+    )
+
+    writer = make_writer(modules, tmp_path, images=images)
+
+    config = modules.auto_scan.AutoScanConfig(
+        PlacementID="placement-01",
+        MeasuredSensorY_mm=1000.0,
+        YStart_machine_mm=20.0,
+        YStop_machine_mm=20.0,
+        X=modules.coordinates.AxisRange(start_mm=50.0, stop_mm=70.0, step_mm=5.0),
+        Z=modules.coordinates.AxisRange(start_mm=-84.0, stop_mm=-76.0, step_mm=4.0),
+        RasterMode="adaptive",
+        MinSignalPixels=4,
+        FindBeam=False,
+        BackgroundMode="none",
+    )
+
+    session = modules.auto_scan.AutoScanSession(writer, config)
+    limits = modules.coordinates.Bounds3D(**LIMITS_KW)
+
+    records = session.run(limits)
+
+    slice_dir = writer.run_dir / "y0100.00cm"
+    dark_files = sorted(slice_dir.glob("*-dark.npy"))
+    lit_files = [
+        p for p in slice_dir.glob("*.npy") if not p.stem.endswith("-dark")
+    ]
+
+    assert len(dark_files) == 8
+    assert len(lit_files) == 1  # the seed
+
+    # Manifests reference the renamed paths (no stale entries).
+    for manifest in (writer.run_dir / "frames.jsonl", slice_dir / "frames.jsonl"):
+        paths = [
+            json.loads(line)["Path"] for line in manifest.read_text().splitlines()
+        ]
+        assert all(Path(p).exists() for p in map(Path, paths)), manifest
+        assert sum(p.endswith("-dark.npy") for p in paths) == 8
+
+    # Raster metadata cell paths follow the rename.
+    meta = json.loads((slice_dir / "raster_metadata.json").read_text())
+    for cell in meta["Cells"]:
+        for path in cell["Paths"]:
+            if not cell["AnySignal"]:
+                assert path.endswith("-dark.npy")
+            assert Path(path).exists()
+
+    # In-memory records were remapped too.
+    assert sum(r.Path.endswith("-dark.npy") for r in records) == 8
+
+
 def test_calibration_seeds_next_slice_from_previous_exposure(modules, tmp_path):
     session, writer, _ = make_session(modules, tmp_path)
     limits = modules.coordinates.Bounds3D(**LIMITS_KW)
@@ -560,6 +624,146 @@ def test_calibration_seeds_next_slice_from_previous_exposure(modules, tmp_path):
     assert calibration_sets[0] == calibration_sets[1]
 
 
+def test_follow_beam_moves_calibration_to_brightest_cell(modules, tmp_path):
+    # Slice 1's two raster points have different brightness; slice 2's
+    # calibration move must target the brighter cell's X/Z, not the
+    # configured center.
+    def frame(value):
+        return FakeImage(np.full((4, 4), value, dtype=np.uint8))
+
+    images = [
+        frame(150),  # slice 1 calibration (converges at seed exposure)
+        frame(40),   # slice 1 scan point (55, -80): dim
+        frame(150),  # slice 1 scan point (60, -80): bright
+        frame(150),  # slice 2 calibration
+        frame(150), frame(150),  # slice 2 scan points
+    ]
+
+    session, writer, _ = make_session(
+        modules, tmp_path, images=images, background_mode="none"
+    )
+    limits = modules.coordinates.Bounds3D(**LIMITS_KW)
+
+    session.run(limits)
+
+    moved = writer.stage_controller.moved_to
+
+    # Slice 1 calibrates at the configured center (57.5); slice 2 at the
+    # brightest slice-1 cell (60, -80).
+    slice1_calibration = moved[0]
+    slice2_calibration = moved[3]
+
+    assert (slice1_calibration.x_mm, slice1_calibration.z_mm) == (57.5, -80.0)
+    assert slice1_calibration.y_mm == 20.0
+    assert (slice2_calibration.x_mm, slice2_calibration.z_mm) == (60.0, -80.0)
+    assert slice2_calibration.y_mm == 30.0
+
+    # The followed point is recorded in the slice's calibration JSON.
+    calibration_2 = json.loads(
+        (writer.run_dir / "y0101.00cm" / "calibration_result.json").read_text()
+    )
+    assert calibration_2["CalibrationX_mm"] == 60.0
+    assert calibration_2["CalibrationZ_mm"] == -80.0
+
+
+def test_follow_beam_disabled_keeps_configured_point(modules, tmp_path):
+    def frame(value):
+        return FakeImage(np.full((4, 4), value, dtype=np.uint8))
+
+    images = [
+        frame(150), frame(40), frame(150),
+        frame(150), frame(150), frame(150),
+    ]
+
+    import dataclasses
+
+    session, writer, _ = make_session(
+        modules, tmp_path, images=images, background_mode="none"
+    )
+    session.config = dataclasses.replace(session.config, FollowBeam=False)
+    limits = modules.coordinates.Bounds3D(**LIMITS_KW)
+
+    session.run(limits)
+
+    moved = writer.stage_controller.moved_to
+    assert (moved[3].x_mm, moved[3].z_mm) == (57.5, -80.0)
+
+
+def make_find_beam_session(modules, tmp_path, images):
+    """Session with a 3-stop Z sweep range (-90, -85, -80) and FindBeam on."""
+
+    writer = make_writer(modules, tmp_path, images=images)
+
+    config = modules.auto_scan.AutoScanConfig(
+        PlacementID="placement-01",
+        MeasuredSensorY_mm=1000.0,
+        YStart_machine_mm=20.0,
+        YStop_machine_mm=20.0,
+        X=modules.coordinates.AxisRange(start_mm=55.0, stop_mm=60.0, step_mm=5.0),
+        Z=modules.coordinates.AxisRange(start_mm=-90.0, stop_mm=-80.0, step_mm=5.0),
+        FindBeam=True,
+        FindBeamStepZ_mm=5.0,
+        BackgroundMode="none",
+    )
+
+    return modules.auto_scan.AutoScanSession(writer, config), writer
+
+
+def blob_image():
+    arr = np.full((12, 16), 2, dtype=np.uint8)
+    arr[4:8, 6:10] = 150  # max 150, median 2 -> contrast 148
+    return FakeImage(arr)
+
+
+def flat_image(value):
+    return FakeImage(np.full((12, 16), value, dtype=np.uint8))
+
+
+def test_find_beam_sweeps_far_end_first_and_seeds_at_contrast(modules, tmp_path):
+    # Stops swept: -90 (flat) then -85 (blob) -> hit; -80 never visited.
+    session, writer = make_find_beam_session(
+        modules, tmp_path, images=[flat_image(2), blob_image()]
+    )
+
+    assert session.find_beam(20.0) is True
+    assert session._calibration_xz == (57.5, -85.0)
+
+    moved_z = [move.z_mm for move in writer.stage_controller.moved_to]
+    assert moved_z == [-90.0, -85.0]  # far extremum first
+
+
+def test_find_beam_rejects_flat_ambient_and_escalates_exposure(modules, tmp_path):
+    # Bright but FLAT frames (ambient at long exposure) must never count as
+    # the beam: 3 attempts x 3 stops, all rejected.
+    session, writer = make_find_beam_session(
+        modules, tmp_path, images=[flat_image(150) for _ in range(9)]
+    )
+
+    assert session.find_beam(20.0) is False
+    assert session._calibration_xz == (57.5, -85.0)  # unchanged (caps center)
+
+    # Exposure escalated x8 per attempt: 10ms, 80ms, 640ms.
+    assert writer.cam.ExposureTime.set_calls == [10000.0, 80000.0, 640000.0]
+
+
+def test_find_beam_engages_only_without_explicit_calibration_point(modules, tmp_path):
+    session, _, _ = make_session(modules, tmp_path, find_beam=True)
+    assert session._need_find_beam is True  # no explicit point given
+
+    import dataclasses
+
+    explicit_writer = make_writer(
+        modules, tmp_path, images=[], job_type="auto_scan2"
+    )
+    explicit = modules.auto_scan.AutoScanSession(
+        explicit_writer,
+        dataclasses.replace(
+            session.config, CalibrationX_mm=59.0, CalibrationZ_mm=-76.0
+        ),
+    )
+    assert explicit._need_find_beam is False
+
+
 def test_beam_direction_sign_flips_beam_y(modules, tmp_path):
     config = modules.auto_scan.AutoScanConfig(
         PlacementID="p",
@@ -571,3 +775,12 @@ def test_beam_direction_sign_flips_beam_y(modules, tmp_path):
     # Machine +Y moves TOWARD the optic: beam y decreases as Y increases.
     assert config.beam_y_mm(20.0) == 1000.0
     assert config.beam_y_mm(30.0) == 990.0
+
+
+def test_beam_direction_default_matches_hardware_verification(modules, tmp_path):
+    # Verified on the rig 2026-07-22: machine +Y points TOWARD the optic.
+    config = modules.auto_scan.AutoScanConfig(
+        PlacementID="p", MeasuredSensorY_mm=1000.0
+    )
+
+    assert config.BeamDirectionSign == -1

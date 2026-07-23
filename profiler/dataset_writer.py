@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Iterable, Optional
 import datetime as dt
 import json
+import logging
 import re
 import threading
 import time
@@ -17,6 +18,8 @@ from camera_settings import FLIRCameraSettings
 from coordinates import ScanPoint, Vec3D
 
 from camera_base import FLIRCameraControllerBase
+
+logger = logging.getLogger(__name__)
 
 
 class DatasetWriterError(RuntimeError):
@@ -35,6 +38,12 @@ class DatasetWriterConfig:
     AcquisitionTimeout_ms: int = 2000
     StageTimeout_s: float = 30.0
     SettleTime_s: float = 0.0
+
+    # Pause between BeginAcquisition and the first software trigger. A
+    # trigger fired while the camera is still arming can be silently
+    # dropped (GenTL -1011 timeout on GetNextImage); this avoids paying
+    # the timeout-and-retry penalty at every raster point.
+    TriggerArmDelay_s: float = 0.1
 
     # Save uint8 / uint16 arrays in binary numpy format.
     # We can encode to BMP or PNG later, but want to avoid any lossy compression at this stage.
@@ -329,6 +338,9 @@ class FLIRDatasetWriter(FLIRCameraControllerBase):
 
         self._begin_acquisition()
 
+        if self.config.TriggerArmDelay_s > 0:
+            time.sleep(self.config.TriggerArmDelay_s)
+
         try:
             for shot_idx in range(point.NShots):
                 if self.signals.StopRequested.is_set():
@@ -365,9 +377,7 @@ class FLIRDatasetWriter(FLIRCameraControllerBase):
         image_result = None
 
         try:
-            self._execute_software_trigger()
-
-            image_result = self.cam.GetNextImage(self.config.AcquisitionTimeout_ms)
+            image_result = self._trigger_and_get_image()
 
             if image_result.IsIncomplete():
                 status = image_result.GetImageStatus()
@@ -403,6 +413,36 @@ class FLIRDatasetWriter(FLIRCameraControllerBase):
                 # propagating exception, the camera cannot be released at
                 # cleanup (Spinnaker error -1004).
                 image_result = None
+
+    def _trigger_and_get_image(self, retries: int = 2):
+        """
+        Software-trigger the camera and fetch the resulting image.
+
+        A trigger executed while the camera is still (re-)arming after
+        BeginAcquisition can be silently dropped, which surfaces as a
+        GenTL -1011 timeout on GetNextImage even though the camera is
+        healthy. Re-triggering recovers it, so retry a couple of times
+        before giving up.
+        """
+
+        attempt = 0
+
+        while True:
+            self._execute_software_trigger()
+
+            try:
+                return self.cam.GetNextImage(self.config.AcquisitionTimeout_ms)
+            except PySpin.SpinnakerException as ex:
+                if attempt < retries and "-1011" in str(ex):
+                    attempt += 1
+                    logger.warning(
+                        "GetNextImage timed out (dropped software trigger?); "
+                        f"re-triggering (attempt {attempt}/{retries}). "
+                        "If this repeats every frame, check that SpinView "
+                        "is fully closed."
+                    )
+                    continue
+                raise
 
     def save_frame_array(
         self,

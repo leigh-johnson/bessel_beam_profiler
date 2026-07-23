@@ -113,6 +113,17 @@ def test_parse_status_report_alarm_and_run_states():
     assert run.MPos.y_mm == -2.5
 
 
+def test_parse_status_report_extracts_triggered_pins():
+    status = parse_status_report("<Alarm|MPos:2.974,-16.279,3.000|FS:0,0|Pn:Y>")
+    assert status.Pins == "Y"
+
+    stuck = parse_status_report("<Idle|MPos:50.000,80.000,-50.000|FS:0,0|Pn:X>")
+    assert stuck.Pins == "X"  # away from the switch: loose signal wire
+
+    clean = parse_status_report("<Idle|MPos:3.000,3.000,3.000|FS:0,0>")
+    assert clean.Pins == ""
+
+
 def test_parse_status_report_rejects_non_status_lines():
     assert parse_status_report("ok") is None
     assert parse_status_report("[MSG:INFO: Homing done]") is None
@@ -246,6 +257,94 @@ def test_connect_still_raises_on_other_modal_errors():
 
     with pytest.raises(FluidNCCommandError, match="error:20"):
         client.connect()
+
+
+# ---------------------------------------------------------------------------
+# Firmware config / soft-limit reads
+# ---------------------------------------------------------------------------
+
+
+def prime_soft_limit_responses(transport, travels, mposes, positives):
+    for axis, travel, mpos, positive in zip("xyz", travels, mposes, positives):
+        transport.responses[f"$/axes/{axis}/max_travel_mm"] = [
+            f"$/axes/{axis}/max_travel_mm={travel}",
+            "ok",
+        ]
+        transport.responses[f"$/axes/{axis}/homing/mpos_mm"] = [
+            f"$/axes/{axis}/homing/mpos_mm={mpos}",
+            "ok",
+        ]
+        transport.responses[f"$/axes/{axis}/homing/positive_direction"] = [
+            f"$/axes/{axis}/homing/positive_direction={positive}",
+            "ok",
+        ]
+
+
+def test_read_config_value_parses_key_value_reply():
+    client, transport = make_client()
+    transport.responses["$/axes/x/max_travel_mm"] = [
+        "$/axes/x/max_travel_mm=120.000",
+        "ok",
+    ]
+
+    assert client.read_config_value("axes/x/max_travel_mm") == "120.000"
+
+
+def test_read_config_value_returns_none_on_unexpected_reply():
+    client, transport = make_client()
+    transport.responses["$/axes/x/max_travel_mm"] = ["[MSG:INFO: nope]", "ok"]
+
+    assert client.read_config_value("axes/x/max_travel_mm") is None
+
+
+def test_read_soft_limits_derives_ranges_from_homing_direction():
+    client, transport = make_client()
+    # X/Y home negative (switch at min, mpos 0 -> range [0, travel]);
+    # Z homes positive at mpos 3 -> range [3 - travel, 3].
+    prime_soft_limit_responses(
+        transport,
+        travels=("120.000", "160.000", "130.000"),
+        mposes=("0.000", "0.000", "3.000"),
+        positives=("false", "false", "true"),
+    )
+
+    limits = client.read_soft_limits()
+
+    assert limits == Bounds3D(
+        x_min_mm=0.0, x_max_mm=120.0,
+        y_min_mm=0.0, y_max_mm=160.0,
+        z_min_mm=-127.0, z_max_mm=3.0,
+    )
+
+
+def test_read_soft_limits_applies_margin():
+    client, transport = make_client()
+    prime_soft_limit_responses(
+        transport,
+        travels=("120.000", "160.000", "130.000"),
+        mposes=("0.000", "0.000", "3.000"),
+        positives=("false", "false", "true"),
+    )
+
+    limits = client.read_soft_limits(margin_mm=1.0)
+
+    assert limits.x_min_mm == 1.0
+    assert limits.x_max_mm == 119.0
+    assert limits.z_min_mm == -126.0
+    assert limits.z_max_mm == 2.0
+
+
+def test_read_soft_limits_returns_none_when_any_item_unreadable():
+    client, transport = make_client()
+    prime_soft_limit_responses(
+        transport,
+        travels=("120.000", "160.000", "130.000"),
+        mposes=("0.000", "0.000", "3.000"),
+        positives=("false", "false", "true"),
+    )
+    transport.responses["$/axes/y/homing/mpos_mm"] = ["error:3"]
+
+    assert client.read_soft_limits() is None
 
 
 # ---------------------------------------------------------------------------

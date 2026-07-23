@@ -257,6 +257,78 @@ def test_acquire_one_frame_refuses_before_movement_complete(
     assert cam.node_map.GetNode("TriggerSoftware").execute_count == 0
 
 
+def test_dropped_trigger_timeout_is_retried(
+    dataset_writer_module,
+    coordinates_module,
+    fake_pyspin,
+    tmp_path,
+):
+    """A -1011 GetNextImage timeout re-triggers instead of failing the scan."""
+
+    arr = np.array([[1, 2], [3, 4]], dtype=np.uint8)
+    image = FakeImage(arr, frame_id=7)
+
+    class DroppedTriggerCamera(FakeCamera):
+        def __init__(self):
+            super().__init__(images=[image])
+            self.failures_remaining = 1
+
+        def GetNextImage(self, timeout_ms):
+            if self.failures_remaining:
+                self.failures_remaining -= 1
+                raise fake_pyspin.SpinnakerException(
+                    "Spinnaker: Failed waiting for EventData on "
+                    "NEW_BUFFER_DATA event. (GenTL error code: -1011) [-1011]"
+                )
+            return super().GetNextImage(timeout_ms)
+
+    cam = DroppedTriggerCamera()
+
+    writer = dataset_writer_module.FLIRDatasetWriter(
+        camera_index=0,
+        cam=cam,
+        camera_settings=FakeCameraSettings(),
+        config=dataset_writer_module.DatasetWriterConfig(
+            JobType="unit_test", DatasetRoot=tmp_path
+        ),
+        stage_controller=FastStageController(),
+    )
+    writer.prepare_run()
+
+    point = make_point(coordinates_module, nshots=1)
+    records = writer.acquire_scan([point])
+
+    assert len(records) == 1
+    assert records[0].Extra["FrameID"] == 7
+    # One dropped trigger + one successful re-trigger.
+    assert cam.node_map.GetNode("TriggerSoftware").execute_count == 2
+
+
+def test_persistent_trigger_timeout_still_raises(
+    dataset_writer_module,
+    coordinates_module,
+    fake_pyspin,
+    tmp_path,
+):
+    class DeadCamera(FakeCamera):
+        def GetNextImage(self, timeout_ms):
+            raise fake_pyspin.SpinnakerException("(GenTL error code: -1011) [-1011]")
+
+    writer = dataset_writer_module.FLIRDatasetWriter(
+        camera_index=0,
+        cam=DeadCamera(),
+        camera_settings=FakeCameraSettings(),
+        config=dataset_writer_module.DatasetWriterConfig(
+            JobType="unit_test", DatasetRoot=tmp_path
+        ),
+        stage_controller=FastStageController(),
+    )
+    writer.prepare_run()
+
+    with pytest.raises(dataset_writer_module.DatasetWriterError, match="-1011"):
+        writer.acquire_scan([make_point(coordinates_module, nshots=1)])
+
+
 def test_incomplete_image_releases_and_ends_acquisition(
     dataset_writer_module,
     coordinates_module,

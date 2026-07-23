@@ -78,6 +78,13 @@ class AdaptiveRasterConfig:
 
     BorderTest: str = "any"  # "any" | "directional"
 
+    # If the SEED frame contains no signal (e.g. the seed landed in the
+    # dark interior of a ring beam), grow in all directions for up to this
+    # many passes anyway, hunting for the beam. Once any captured cell has
+    # signal, the normal edge rule takes over; if nothing is found the
+    # raster stops and reports BeamFound=false.
+    BlindProbePasses: int = 2
+
     # Image-axis -> machine-axis mapping, used only by "directional".
     ImageTranspose: bool = False
     ImageFlipX: bool = False
@@ -302,11 +309,28 @@ class AdaptiveRasterRunner:
 
         iterations: list[dict[str, Any]] = []
         edge_stops: dict[str, str] = {}
+        blind_passes_used = 0
 
         while True:
+            beam_found = any(cell.AnySignal for cell in self.cells.values())
+            blind_probe = (
+                not beam_found and blind_passes_used < self.config.BlindProbePasses
+            )
+
+            if not beam_found and not blind_probe:
+                # Seed was dark and the probe budget is spent: nothing here.
+                edge_stops = {side: "dark" for side in DIRECTIONS}
+                logger.warning(
+                    "Adaptive raster found NO beam signal: the seed frame "
+                    f"and {blind_passes_used} blind probe pass(es) around it "
+                    "are all dark. Check the calibration/seed position."
+                )
+                break
+
             grew_any = False
             pass_report: dict[str, Any] = {
                 "Pass": len(iterations) + 1,
+                "BlindProbe": blind_probe,
                 "Grew": [],
                 "Stopped": {},
                 "CellsAdded": [],
@@ -318,7 +342,9 @@ class AdaptiveRasterRunner:
                     self.cells[cell].BorderSignal[side] for cell in edge
                 )
 
-                if not edge_signal:
+                # Blind probe: grow outward regardless of (dark) borders,
+                # hunting for a beam the seed missed.
+                if not edge_signal and not blind_probe:
                     pass_report["Stopped"][side] = "dark"
                     continue
 
@@ -338,6 +364,9 @@ class AdaptiveRasterRunner:
 
                 pass_report["Grew"].append(side)
                 grew_any = True
+
+            if blind_probe:
+                blind_passes_used += 1
 
             iterations.append(pass_report)
 
@@ -363,7 +392,8 @@ class AdaptiveRasterRunner:
         cells_in_order = [self.cells[key] for key in self.capture_order]
         records = [r for cell in cells_in_order for r in cell.Records]
 
-        single_frame = len(cells_in_order) == 1
+        beam_found = any(cell.AnySignal for cell in cells_in_order)
+        single_frame = len(cells_in_order) == 1 and beam_found
 
         if single_frame:
             logger.info(
@@ -396,6 +426,8 @@ class AdaptiveRasterRunner:
             "CellsCaptured": len(cells_in_order),
             "FixedGridCells": fixed_grid_cells,
             "BeamFitsInSingleFrame": single_frame,
+            "BeamFound": beam_found,
+            "BlindProbePassesUsed": blind_passes_used,
             "Cells": [
                 {
                     "I": cell.I,

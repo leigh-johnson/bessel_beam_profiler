@@ -38,9 +38,11 @@ python cli.py preflight --motion
 
 - [ ] Homing: Z retracts up first, then X and Y auto-square. Watch it.
 - [ ] Beam-direction check: it moves to X60 Y20 Z-60, then +30 mm in Y,
-      and asks whether the camera moved AWAY from the optic. Note the
-      answer — if "no", add `--beam-direction -y` to every `dataset auto`
-      call today.
+      and asks whether the camera moved AWAY from the optic. On this rig
+      the verified answer (2026-07-22) is "no" — +Y points toward the
+      optic — which matches the default `--beam-direction -y`. If the
+      answer ever flips, the gantry orientation changed: pass
+      `--beam-direction +y`.
 
 ## 3. Find the beam (hands-on)
 
@@ -62,9 +64,7 @@ python cli.py preflight --motion
 ## 5. Smoke scan (3 slices, ~5 min)
 
 ```bash
-python cli.py dataset auto --dataset-root data \
-    --y-start 10 --y-stop 30 --y-step 10 \
-    --x-min 47 --x-max 77 --z-min -73 --z-max -43
+python cli.py dataset auto --dataset-root data --y-start 10 --y-stop 10 --raster fixed --x-min 5 --x-max 107 --x-step 7 --z-min -95 --z-max -2 --z-step 5 --calibration-x 59 --calibration-z -76 --background-mode none
 ```
 
 Then inspect the run directory:
@@ -79,6 +79,8 @@ Then inspect the run directory:
       beam.
 - [ ] `calibration_result.json`: `Converged: true`, exposure sane, and the
       scan-frame `.jpg`s show the beam near the frame center.
+
+- [ ] Check beam bounds: `python beam_bounds.py data/auto_scan-*/y*.00cm`
 
 ## 6. Validate the off-axis background corner (once)
 

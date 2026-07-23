@@ -26,11 +26,35 @@ from log_utils import add_file_log, remove_file_log
 logger = logging.getLogger(__name__)
 
 
+def resolve_scan_caps(limits, x_min, x_max, z_min, z_max):
+    """
+    Fill unset X/Z caps from the machine envelope (already margin-shrunk).
+    With the adaptive raster, wide caps cost nothing — the raster only
+    visits the beam — so the whole envelope is the sane default; explicit
+    values are kept as-is (and validated upstream).
+    """
+
+    return (
+        limits.x_min_mm if x_min is None else x_min,
+        limits.x_max_mm if x_max is None else x_max,
+        limits.z_min_mm if z_min is None else z_min,
+        limits.z_max_mm if z_max is None else z_max,
+    )
+
+
 @click.command("auto")
 # -- connection -------------------------------------------------------------
 @click.option("--host", default="fluidnc-sr2.local", show_default=True, help="FluidNC hostname or IP.")
 @click.option("--port", default=23, show_default=True, type=int)
 @click.option("--feed", default=400.0, show_default=True, type=float, help="Feed rate for scan moves, mm/min.")
+@click.option(
+    "--soft-limit-margin",
+    default=1.0,
+    show_default=True,
+    type=click.FloatRange(min=0.0),
+    help="Keep-out margin (mm) inside the firmware's soft limits; all "
+    "bounds are validated against firmware limits minus this margin.",
+)
 # -- camera -----------------------------------------------------------------
 @click.option(
     "--camera-settings",
@@ -61,12 +85,32 @@ logger = logging.getLogger(__name__)
     "dark (x/z ranges act as the CAP; a beam that fits in one frame takes "
     "one frame). fixed: always raster the full x/z grid.",
 )
-@click.option("--x-min", default=45.0, show_default=True, type=float, help="Horizontal transverse (machine X), mm.")
-@click.option("--x-max", default=75.0, show_default=True, type=float)
+@click.option("--x-min", default=None, type=float, help="Horizontal transverse cap (machine X), mm. Default: the firmware soft-limit envelope (minus margin).")
+@click.option("--x-max", default=None, type=float, help="Default: firmware envelope.")
 @click.option("--x-step", default=5.0, show_default=True, type=float, help="~30% overlap for the 7.1 mm-wide sensor.")
-@click.option("--z-min", default=-75.0, show_default=True, type=float, help="Vertical (machine Z, negative = down), mm.")
-@click.option("--z-max", default=-45.0, show_default=True, type=float)
+@click.option("--z-min", default=None, type=float, help="Vertical cap (machine Z, negative = down), mm. Default: firmware envelope.")
+@click.option("--z-max", default=None, type=float, help="Default: firmware envelope.")
 @click.option("--z-step", default=4.0, show_default=True, type=float, help="~25% overlap for the 5.3 mm-tall sensor.")
+@click.option("--calibration-x", "calibration_x_mm", default=None, type=float, help="Where the camera sits during exposure calibration (machine X). Default: center of the X caps. Point this at a known-bright part of the beam.")
+@click.option("--calibration-z", "calibration_z_mm", default=None, type=float, help="Where the camera sits during exposure calibration (machine Z). Default: center of the Z caps.")
+@click.option(
+    "--follow-beam/--no-follow-beam",
+    "follow_beam",
+    default=True,
+    show_default=True,
+    help="Track the beam along the stack: each slice calibrates and seeds "
+    "its raster at the previous slice's brightest cell (ring beams drift "
+    "and change radius with Y).",
+)
+@click.option(
+    "--find-beam/--no-find-beam",
+    "find_beam",
+    default=True,
+    show_default=True,
+    help="When no --calibration-x/-z is given (or the beam is lost), sweep "
+    "a Z column from the far extremum looking for structured light "
+    "(contrast, not brightness — ambient can't fake it) and seed there.",
+)
 @click.option("--signal-margin", default=8.0, show_default=True, type=float, help="Adaptive: counts above the background p99 that count as beam signal.")
 @click.option("--min-signal-pixels", default=50, show_default=True, type=click.IntRange(min=1), help="Adaptive: pixels above threshold needed to call a border strip 'signal'.")
 # -- Y stack: stepping along the beam ---------------------------------------
@@ -75,12 +119,12 @@ logger = logging.getLogger(__name__)
 @click.option("--y-step", default=10.0, show_default=True, type=float, help="Beam-direction interval, mm (10 = 1 cm).")
 @click.option(
     "--beam-direction",
-    default="+y",
+    default="-y",
     show_default=True,
     type=click.Choice(["+y", "-y"]),
-    help="+y if machine +Y points downstream (away from the optic), -y if "
-    "toward it. Verify once: jog +Y and check the camera moves away from "
-    "the optic.",
+    help="-y if machine +Y points TOWARD the optic (verified on this rig "
+    "2026-07-22 via preflight), +y if it points downstream. Re-verify "
+    "after any gantry re-orientation: jog +Y and watch the camera.",
 )
 # -- backgrounds ------------------------------------------------------------
 @click.option(
@@ -117,6 +161,7 @@ def auto_scan(
     host: str,
     port: int,
     feed: float,
+    soft_limit_margin: float,
     camera_settings_path,
     camera_index: int,
     acquisition_timeout_ms: int,
@@ -130,6 +175,10 @@ def auto_scan(
     z_min: float,
     z_max: float,
     z_step: float,
+    calibration_x_mm,
+    calibration_z_mm,
+    follow_beam: bool,
+    find_beam: bool,
     signal_margin: float,
     min_signal_pixels: int,
     y_start: float,
@@ -177,6 +226,10 @@ def auto_scan(
         FluidNCStageConfig,
         FluidNCStageController,
     )
+    from fluidnc_stage_cli import (
+        check_bounds_against_limits,
+        report_soft_limit_violations,
+    )
 
     run_metadata = _parse_metadata(metadata)
 
@@ -192,6 +245,55 @@ def auto_scan(
 
     status = client.query_status()
     click.echo(f"FluidNC: {status.Raw}")
+
+    # Validate every requested bound against the firmware's ACTUAL soft
+    # limits (minus the keep-out margin) before anything moves — a
+    # soft-limit alarm mid-scan loses machine position and aborts the run.
+    firmware_limits = client.read_soft_limits(margin_mm=soft_limit_margin)
+
+    if firmware_limits is None:
+        click.secho(
+            "Could not read firmware soft limits; validating against the "
+            "conservative hardcoded envelope instead.",
+            fg="yellow",
+        )
+    else:
+        # The runtime stage validation should agree with what we verified.
+        stage.config.MachineLimits_mm = firmware_limits
+
+    effective_limits = stage.config.MachineLimits_mm
+    click.echo(
+        f"Motion envelope: X {effective_limits.x_min_mm:g}..{effective_limits.x_max_mm:g}  "
+        f"Y {effective_limits.y_min_mm:g}..{effective_limits.y_max_mm:g}  "
+        f"Z {effective_limits.z_min_mm:g}..{effective_limits.z_max_mm:g}"
+    )
+
+    x_min, x_max, z_min, z_max = resolve_scan_caps(
+        effective_limits, x_min, x_max, z_min, z_max
+    )
+    click.echo(
+        f"Raster caps: X {x_min:g}..{x_max:g}  Z {z_min:g}..{z_max:g}"
+    )
+
+    violations, replacements = check_bounds_against_limits(
+        {
+            "--x-min": (x_min, "x"),
+            "--x-max": (x_max, "x"),
+            "--z-min": (z_min, "z"),
+            "--z-max": (z_max, "z"),
+            "--y-start": (y_start, "y"),
+            "--y-stop": (y_stop, "y"),
+            "--calibration-x": (calibration_x_mm, "x"),
+            "--calibration-z": (calibration_z_mm, "z"),
+            "--background-x": (background_x_mm, "x"),
+            "--background-z": (background_z_mm, "z"),
+        },
+        effective_limits,
+    )
+
+    if violations:
+        client.close()
+        report_soft_limit_violations(violations, effective_limits, replacements)
 
     if skip_background:
         background_mode = "none"
@@ -249,6 +351,10 @@ def auto_scan(
                 BeamDirectionSign=1 if beam_direction == "+y" else -1,
                 X=AxisRange(start_mm=x_min, stop_mm=x_max, step_mm=x_step),
                 Z=AxisRange(start_mm=z_min, stop_mm=z_max, step_mm=z_step),
+                CalibrationX_mm=calibration_x_mm,
+                CalibrationZ_mm=calibration_z_mm,
+                FollowBeam=follow_beam,
+                FindBeam=find_beam,
                 RasterMode=raster_mode,
                 SignalMargin_counts=signal_margin,
                 MinSignalPixels=min_signal_pixels,
@@ -296,6 +402,26 @@ def auto_scan(
             camera_settings = _load_camera_settings_for_software_trigger(
                 camera_settings_path
             )
+
+            if camera_settings_path is None:
+                # The default FLIRCameraSettings enable a 3 fps frame-rate
+                # limiter, which is pointless (and a potential 6x slowdown)
+                # in software-trigger mode. A user-provided settings file is
+                # respected as-is.
+                from dataclasses import replace as dataclass_replace
+
+                # Rate must be None too: with the limiter disabled the
+                # AcquisitionFrameRate node is read-only, and apply()
+                # would raise trying to set it.
+                camera_settings = dataclass_replace(
+                    camera_settings,
+                    AcquisitionFrameRateEnable=False,
+                    AcquisitionFrameRate=None,
+                )
+                logger.info(
+                    "No --camera-settings file: disabling the default 3 fps "
+                    "frame-rate limiter for software-triggered acquisition."
+                )
 
             writer = FLIRDatasetWriter(
                 camera_index=camera_index,

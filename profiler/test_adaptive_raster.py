@@ -228,6 +228,55 @@ def test_center_outside_caps_is_an_error():
 
 
 # ---------------------------------------------------------------------------
+# Blind probe (dark seed)
+# ---------------------------------------------------------------------------
+
+
+def test_dark_seed_probes_outward_and_finds_offset_beam():
+    # Ring-interior scenario: the seed cell is dark, the beam sits two
+    # grid steps away in +x. Blind probing must find it, then normal
+    # growth must cover it.
+    beam_center = (CENTER[0] + 2 * STEP[0], CENTER[1])
+    radius = 3.0
+
+    result, camera = run_raster(beam_center, radius)
+
+    captured = {(i, j) for (_, _, i, j) in camera.captured}
+    required = lattice_cells_with_signal(make_config(), beam_center, radius)
+
+    assert required <= captured
+    meta = result.Metadata
+    assert meta["BeamFound"] is True
+    assert meta["BlindProbePassesUsed"] >= 1
+    assert meta["BeamFitsInSingleFrame"] is False
+
+
+def test_completely_dark_field_stops_after_probe_budget(caplog):
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="adaptive_raster"):
+        # Beam far outside the caps: nothing to find anywhere.
+        result, camera = run_raster((CENTER[0] + 500.0, CENTER[1]), 2.0)
+
+    meta = result.Metadata
+    assert meta["BeamFound"] is False
+    assert meta["BeamFitsInSingleFrame"] is False
+    assert meta["BlindProbePassesUsed"] == 2  # default budget
+    # Seed + two blind rings: 1 + 8 + 16 = 25 cells, not the full lattice.
+    assert meta["CellsCaptured"] == 25
+    assert any("NO beam signal" in r.message for r in caplog.records)
+
+
+def test_blind_probe_disabled_stops_at_dark_seed():
+    result, camera = run_raster(
+        (CENTER[0] + 500.0, CENTER[1]), 2.0, BlindProbePasses=0
+    )
+
+    assert result.Metadata["CellsCaptured"] == 1
+    assert result.Metadata["BeamFound"] is False
+
+
+# ---------------------------------------------------------------------------
 # Directional border test
 # ---------------------------------------------------------------------------
 

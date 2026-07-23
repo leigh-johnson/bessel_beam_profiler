@@ -18,9 +18,11 @@ A beam cross-section is an **X-Z raster** at fixed machine Y; the scan
 quantity is the along-beam distance (`BeamY_mm`), which names the slice
 folders.
 
-`--beam-direction` sets the sign: `+y` if machine +Y points downstream
-(away from the optic). **Verify once on hardware**: jog +Y and check the
-camera moves away from the optic.
+`--beam-direction` sets the sign. **Verified on this rig 2026-07-22**
+(preflight beam-direction check): machine +Y moves the camera TOWARD the
+optic, so the default is `-y` — stepping +Y along the stack means beam
+distance *decreases* from the measured start value. Re-verify (preflight
+`--motion`) if the gantry is ever re-oriented on the table.
 
 ## How G-code gets to FluidNC
 
@@ -96,6 +98,29 @@ Workflow per placement (repeats for as many placements as you want):
   axes map to machine axes, `BorderTest="directional"` in `AutoScanConfig`
   (with `ImageTranspose`/`ImageFlipX`/`ImageFlipY`) removes the overshoot.
 * `fixed`: always raster the full X × Z grid.
+
+Ring-beam safeguards (all on by default):
+
+* **Find-beam sweep** (`--find-beam/--no-find-beam`): when no
+  `--calibration-x/-z` is given (or a slice reports `BeamFound: false`),
+  the camera sweeps a column of frames along Z at the calibration X —
+  starting from the FAR extremum (away from the Z home switch, where the
+  beam sits on this rig) — looking for CONTRAST (frame max − median ≥ 30
+  counts). Contrast is the discriminator brightness can't be: exposure
+  calibration on a dark spot will happily "converge" by amplifying flat
+  ambient light, but ambient has no contrast at any exposure. A flat
+  sweep escalates exposure ×8 and retries twice before warning and
+  giving up.
+
+* **Blind probe**: if the seed frame is dark (seed landed in the ring's
+  hollow interior), the raster grows up to `BlindProbePasses` (2) rings
+  outward anyway hunting for the beam, then either resumes normal growth
+  or stops with `BeamFound: false` in the metadata and a loud warning.
+* **Follow-beam** (`--follow-beam/--no-follow-beam`): after each slice,
+  the calibration point and raster seed move to that slice's brightest
+  measured cell, so a ring whose radius changes along Y can't drift the
+  fixed point into darkness. The point used is recorded per slice in
+  `calibration_result.json` (`CalibrationX_mm`/`CalibrationZ_mm`).
 
 Every slice folder gets a `raster_metadata.json` in either mode: the grid,
 final rectangle, cells captured vs. the full-grid count, per-cell border

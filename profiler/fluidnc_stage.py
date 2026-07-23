@@ -190,6 +190,14 @@ class FluidNCStatus:
 
     State: str  # Idle, Run, Home, Alarm, Hold:0, Jog, ...
     MPos: Optional[Vec3D] = None
+
+    # Triggered input pins from the |Pn:...| field, e.g. "X" or "XYZ".
+    # With NC limit switches, a pin reads triggered when the switch is
+    # PRESSED **or** when its signal wire is loose/disconnected — a pin
+    # stuck triggered away from the switch means a wiring problem, and
+    # homing that axis will retract away and fail.
+    Pins: str = ""
+
     Raw: str = ""
 
     @property
@@ -205,6 +213,7 @@ STATUS_RE = re.compile(r"^<(?P<state>[^|>]+)(?P<fields>(\|[^>]*)?)>$")
 MPOS_RE = re.compile(
     r"\|MPos:(?P<x>-?[\d.]+),(?P<y>-?[\d.]+),(?P<z>-?[\d.]+)"
 )
+PINS_RE = re.compile(r"\|Pn:(?P<pins>[A-Za-z]+)")
 
 
 def parse_status_report(line: str) -> Optional[FluidNCStatus]:
@@ -213,8 +222,10 @@ def parse_status_report(line: str) -> Optional[FluidNCStatus]:
     if match is None:
         return None
 
+    fields = match.group("fields") or ""
+
     mpos = None
-    mpos_match = MPOS_RE.search(match.group("fields") or "")
+    mpos_match = MPOS_RE.search(fields)
 
     if mpos_match is not None:
         mpos = Vec3D(
@@ -223,7 +234,12 @@ def parse_status_report(line: str) -> Optional[FluidNCStatus]:
             z_mm=float(mpos_match.group("z")),
         )
 
-    return FluidNCStatus(State=match.group("state"), MPos=mpos, Raw=line.strip())
+    pins_match = PINS_RE.search(fields)
+    pins = pins_match.group("pins") if pins_match else ""
+
+    return FluidNCStatus(
+        State=match.group("state"), MPos=mpos, Pins=pins, Raw=line.strip()
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -391,6 +407,119 @@ class FluidNCClient:
     def soft_reset(self) -> None:
         self.transport.write(b"\x18")
 
+    # -- firmware configuration ----------------------------------------
+
+    def read_config_value(self, path: str) -> Optional[str]:
+        """
+        Read one FluidNC config item, e.g. read_config_value(
+        "axes/x/max_travel_mm") -> "120.000". Returns None (with a logged
+        warning) if the item cannot be read or parsed.
+        """
+
+        command = f"$/{path.lstrip('/')}"
+
+        try:
+            lines = self.send_command(command)
+        except FluidNCError as ex:
+            logger.warning(f"Config read {command} failed: {ex}")
+            return None
+
+        wanted = path.strip("/").lower()
+
+        for line in lines:
+            key, sep, value = line.partition("=")
+            if sep and key.strip().lstrip("$").strip("/").lower() == wanted:
+                return value.strip()
+
+        logger.warning(f"Config read {command}: no value in reply {lines!r}")
+        return None
+
+    def read_soft_limits(self, margin_mm: float = 0.0) -> Optional[Bounds3D]:
+        """
+        The firmware's ACTUAL soft-limit ranges, derived per axis from
+        max_travel_mm, homing mpos_mm, and homing direction (FluidNC
+        allows [mpos - travel, mpos] for positive-homing axes and
+        [mpos, mpos + travel] for negative-homing ones). margin_mm shrinks
+        the returned bounds on every side.
+
+        Returns None (with logged warnings) if any item cannot be read —
+        callers should fall back to conservative hardcoded limits.
+        """
+
+        bounds: dict[str, float] = {}
+
+        for axis in ("x", "y", "z"):
+            travel_s = self.read_config_value(f"axes/{axis}/max_travel_mm")
+            mpos_s = self.read_config_value(f"axes/{axis}/homing/mpos_mm")
+            positive_s = self.read_config_value(
+                f"axes/{axis}/homing/positive_direction"
+            )
+
+            if travel_s is None or mpos_s is None or positive_s is None:
+                logger.warning(
+                    f"Could not read firmware soft limits for axis "
+                    f"{axis.upper()}; falling back to hardcoded limits."
+                )
+                return None
+
+            try:
+                travel = float(travel_s)
+                mpos = float(mpos_s)
+            except ValueError as ex:
+                logger.warning(
+                    f"Unparseable firmware limit values for axis "
+                    f"{axis.upper()} ({ex}); falling back to hardcoded limits."
+                )
+                return None
+
+            positive = positive_s.strip().lower() in ("true", "yes", "1")
+
+            if positive:
+                lo, hi = mpos - travel, mpos
+            else:
+                lo, hi = mpos, mpos + travel
+
+            bounds[f"{axis}_min_mm"] = lo + margin_mm
+            bounds[f"{axis}_max_mm"] = hi - margin_mm
+
+        limits = Bounds3D(**bounds)
+
+        logger.info(
+            f"Firmware soft limits (margin {margin_mm:g} mm): "
+            f"X {limits.x_min_mm:g}..{limits.x_max_mm:g}, "
+            f"Y {limits.y_min_mm:g}..{limits.y_max_mm:g}, "
+            f"Z {limits.z_min_mm:g}..{limits.z_max_mm:g}"
+        )
+
+        return limits
+
+    def set_config_value(self, path: str, value) -> None:
+        """
+        Set one FluidNC config item at runtime, e.g. set_config_value(
+        "axes/z/max_travel_mm", 90). VOLATILE: lost on reboot unless the
+        controller's config.yaml is updated too.
+        """
+
+        self.send_command(f"$/{path.lstrip('/')}={value}")
+
+    def jog_incremental(
+        self,
+        axis: str,
+        delta_mm: float,
+        feed_mm_min: float = 150.0,
+        timeout_s: float = 120.0,
+    ) -> FluidNCStatus:
+        """
+        Relative jog on one axis ($J=G91), blocking until motion stops.
+        Jogs against an ENABLED soft limit are rejected with error:15
+        (no alarm, no position loss).
+        """
+
+        self.send_command(
+            f"$J=G91 {axis.upper()}{delta_mm:.3f} F{feed_mm_min:.1f}"
+        )
+        return self.wait_until_idle(timeout_s=timeout_s)
+
     # -- high-level operations -----------------------------------------
 
     def unlock(self) -> None:
@@ -511,14 +640,17 @@ def _parse_trailing_int(line: str) -> Optional[int]:
 # ---------------------------------------------------------------------------
 
 
-# 5 mm inside the homed machine travel (X 0..120, Y 0..160, Z -127..3),
-# matching the envelope proven by rangetest.gcode.
+# Conservative FALLBACK envelope, used only when the firmware's soft
+# limits cannot be read (read_soft_limits is the source of truth): 5 mm
+# inside the config.yaml travels as of 2026-07-22 — max_travel X 110 /
+# Y 160 / Z 90 with homing mpos 3, giving firmware ranges X [3, 113],
+# Y [3, 163], Z [-87, 3].
 DEFAULT_MACHINE_LIMITS = Bounds3D(
-    x_min_mm=5.0,
-    x_max_mm=115.0,
-    y_min_mm=5.0,
-    y_max_mm=155.0,
-    z_min_mm=-120.0,
+    x_min_mm=8.0,
+    x_max_mm=108.0,
+    y_min_mm=8.0,
+    y_max_mm=158.0,
+    z_min_mm=-82.0,
     z_max_mm=-2.0,
 )
 

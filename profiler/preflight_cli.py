@@ -164,6 +164,18 @@ def check_gantry(tally: Tally, host: str, port: int):
                 f"MPos X{status.MPos.x_mm:g} Y{status.MPos.y_mm:g} "
                 f"Z{status.MPos.z_mm:g}"
             )
+
+        if status.Pins:
+            tally.warn(
+                f"input pins reading TRIGGERED: {status.Pins}. With NC "
+                "switches this means the switch is pressed OR its signal "
+                "wire is loose/disconnected. If the carriage is not "
+                "physically at that switch, reseat the switch's Dupont on "
+                "the Jackpot — homing that axis will retract away and "
+                "fail until fixed."
+            )
+        else:
+            tally.ok("no limit/control pins triggered")
     except FluidNCError as ex:
         tally.fail(f"status query failed: {ex}")
         client.close()
@@ -176,6 +188,20 @@ def check_gantry(tally: Tally, host: str, port: int):
         tally.ok("firmware build info ($I)")
     except FluidNCError as ex:
         tally.warn(f"$I build info failed (non-critical): {ex}")
+
+    limits = client.read_soft_limits()
+
+    if limits is not None:
+        tally.ok(
+            f"firmware soft limits: X {limits.x_min_mm:g}..{limits.x_max_mm:g}  "
+            f"Y {limits.y_min_mm:g}..{limits.y_max_mm:g}  "
+            f"Z {limits.z_min_mm:g}..{limits.z_max_mm:g}"
+        )
+    else:
+        tally.warn(
+            "could not read firmware soft limits — scans fall back to the "
+            "conservative hardcoded envelope"
+        )
 
     return client
 
@@ -220,15 +246,19 @@ def check_motion(tally: Tally, client) -> None:
         return
 
     moved_away = click.confirm(
-        "Did the camera move AWAY from the optic (downstream)?", default=True
+        "Did the camera move AWAY from the optic (downstream)?", default=False
     )
 
     if moved_away:
-        tally.ok("machine +Y is downstream: use --beam-direction +y (the default)")
-    else:
         tally.warn(
-            "machine +Y points TOWARD the optic: pass --beam-direction -y "
-            "to dataset auto"
+            "machine +Y is downstream: pass --beam-direction +y to dataset "
+            "auto (the default is -y — the gantry orientation must have "
+            "changed since 2026-07-22)"
+        )
+    else:
+        tally.ok(
+            "machine +Y points toward the optic: matches the default "
+            "--beam-direction -y"
         )
 
 
@@ -312,8 +342,8 @@ def check_camera(tally: Tally, camera_index: int, grab: bool) -> None:
             try:
                 if cam.IsStreaming():
                     cam.EndAcquisition()
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as ex:  # noqa: BLE001 - cleanup must not mask checks
+                tally.warn(f"EndAcquisition during camera cleanup failed: {ex}")
             cam.DeInit()
             del cam
 

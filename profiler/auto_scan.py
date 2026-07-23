@@ -30,8 +30,9 @@ A cross-section of the beam is therefore an X-Z raster at fixed machine Y
        optic, e.g. run_dir/y0100.00cm/, each with its own frames.jsonl,
        calibration, raster metadata, and background reference.
 
-Verify BeamDirectionSign once on hardware: move +Y and check the camera
-moves AWAY from the optic (sign +1) or toward it (sign -1).
+BeamDirectionSign was verified on hardware 2026-07-22 (preflight
+beam-direction check): on this rig machine +Y moves the camera TOWARD the
+optic, so the default is -1. Re-verify after any gantry re-orientation.
 """
 
 from __future__ import annotations
@@ -41,6 +42,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 import json
 import logging
+import time
 
 import numpy as np
 
@@ -55,6 +57,12 @@ from headless_calibration import (
 logger = logging.getLogger(__name__)
 
 BACKGROUND_SUBFOLDER = "background"
+
+# Filename suffix (before the extension) for the adaptive raster's
+# no-signal frames — the proof-of-darkness perimeter. They stay in the
+# dataset (they document why growth stopped) but are visibly labeled and
+# excluded from composites by default.
+DARK_FRAME_SUFFIX = "-dark"
 
 
 def default_background_ladder_us(
@@ -82,8 +90,10 @@ class AutoScanConfig:
     YStep_mm: float = 10.0
 
     # +1 if machine +Y points downstream (away from the optic), -1 if
-    # machine +Y points toward it. VERIFY ONCE on hardware.
-    BeamDirectionSign: int = 1
+    # machine +Y points toward it. Default -1: VERIFIED on hardware
+    # 2026-07-22 (preflight beam-direction check) — machine +Y moves the
+    # camera TOWARD the optic on this rig.
+    BeamDirectionSign: int = -1
 
     # X-Z cross-section raster (machine coordinates) at every Y. In
     # adaptive raster mode these are the CAPS (maximum extent), not the
@@ -122,6 +132,30 @@ class AutoScanConfig:
     # machine X/Z. None = center of the X/Z raster caps.
     CalibrationX_mm: Optional[float] = None
     CalibrationZ_mm: Optional[float] = None
+
+    # Follow the beam along the stack: after each slice, move the
+    # calibration point (and adaptive-raster seed) to the brightest
+    # measured cell of that slice. Essential for ring beams whose radius
+    # changes with Y — a fixed point can drift into the dark interior,
+    # breaking both exposure calibration and the raster seed.
+    FollowBeam: bool = True
+
+    # Find the beam automatically when no explicit calibration point is
+    # given (and re-find after a slice reports BeamFound=false): sweep a
+    # column of frames along Z at the calibration X, starting from the
+    # FAR end of the Z caps (Z.start_mm — the extremum away from the Z
+    # home switch, where the beam sits on this rig), looking for
+    # CONTRAST (frame max - median >= FindBeamContrast_counts). Contrast
+    # rejects what raw brightness cannot: exposure calibration on a dark
+    # spot happily "converges" by amplifying flat ambient light, but
+    # ambient has no contrast at any exposure. If a whole sweep is flat,
+    # exposure is scaled x8 and the sweep repeats (FindBeamExposureScalings
+    # times) before giving up with a warning.
+    FindBeam: bool = True
+    FindBeamStepZ_mm: float = 5.0  # ~sensor height: gap-free column
+    FindBeamContrast_counts: float = 30.0
+    FindBeamStartExposure_us: float = 10_000.0
+    FindBeamExposureScalings: int = 2
 
     NShots: int = 1
 
@@ -208,7 +242,32 @@ def y_subfolder_name(beam_y_mm: float) -> str:
 def _grab_frame(writer, timeout_ms: int) -> Optional[np.ndarray]:
     writer._execute_software_trigger()
 
-    image_result = writer.cam.GetNextImage(timeout_ms)
+    # Long exposures (dim slices) can exceed the base acquisition timeout;
+    # extend it by the current exposure time so the grab cannot time out
+    # while the sensor is legitimately still integrating.
+    try:
+        timeout_ms = int(timeout_ms + writer.cam.ExposureTime.GetValue() / 1000.0)
+    except Exception as ex:  # noqa: BLE001 - fall back to the base timeout
+        logger.warning(
+            f"Could not read ExposureTime to extend the grab timeout ({ex}); "
+            f"using the base timeout of {timeout_ms} ms. Long-exposure "
+            "frames may spuriously time out."
+        )
+
+    try:
+        image_result = writer.cam.GetNextImage(timeout_ms)
+    except Exception as ex:  # noqa: BLE001 - narrow to Spinnaker timeouts
+        # A software trigger fired while the camera was still arming can be
+        # silently dropped (GenTL -1011 timeout). Treat it like an
+        # incomplete frame: the calibration loop re-triggers on the next
+        # grab_frame() call and gives up cleanly after its retry limit.
+        if "Spinnaker" in type(ex).__name__ or "-1011" in str(ex):
+            logger.warning(
+                f"Calibration frame grab timed out ({ex}); re-triggering. "
+                "If this repeats, check that SpinView is fully closed."
+            )
+            return None
+        raise
 
     try:
         if image_result.IsIncomplete():
@@ -261,6 +320,18 @@ class AutoScanSession:
         # Off-axis background reuse state: set whenever a background is
         # actually captured, consulted before capturing the next one.
         self._last_background: Optional[dict[str, Any]] = None
+
+        # Where the next slice calibrates and seeds its raster. Starts at
+        # the configured point; with FollowBeam it tracks the brightest
+        # measured cell slice-to-slice.
+        self._calibration_xz: tuple[float, float] = config.calibration_xz()
+
+        # Run the find-beam sweep before the first slice when the user did
+        # not point us at the beam explicitly; re-armed whenever a slice
+        # comes up empty.
+        self._need_find_beam: bool = config.FindBeam and (
+            config.CalibrationX_mm is None or config.CalibrationZ_mm is None
+        )
 
     # -- geometry -------------------------------------------------------
 
@@ -503,6 +574,74 @@ class AutoScanSession:
         self.records.extend(records)
         return records
 
+    # -- beam finding ---------------------------------------------------
+
+    def find_beam(self, machine_y_mm: float) -> bool:
+        """
+        Sweep a column of frames along Z at the calibration X, far end
+        first, hunting for structured light (contrast = max - median).
+        On a hit, the calibration point / raster seed moves there.
+        """
+
+        x = self._calibration_xz[0]
+
+        z_values: list[float] = []
+        z = self.config.Z.start_mm  # far-from-switch end (Z homes at top)
+        while z <= self.config.Z.stop_mm + 1e-9:
+            z_values.append(round(z, 3))
+            z += self.config.FindBeamStepZ_mm
+
+        exposure_us = float(self.config.FindBeamStartExposure_us)
+        max_exposure_us = self.calibration_config.Base.MaxExposure_us
+        timeout_ms = self.writer.config.AcquisitionTimeout_ms
+
+        for attempt in range(1 + self.config.FindBeamExposureScalings):
+            actual_us = set_exposure_us(
+                self.writer.cam, min(exposure_us, max_exposure_us)
+            )
+            logger.info(
+                f"find-beam: sweeping Z {z_values[0]:g}..{z_values[-1]:g} at "
+                f"X{x:g}, exposure {actual_us:g} us "
+                f"(attempt {attempt + 1}/{1 + self.config.FindBeamExposureScalings})"
+            )
+
+            self.writer._begin_acquisition()
+
+            if self.writer.config.TriggerArmDelay_s > 0:
+                time.sleep(self.writer.config.TriggerArmDelay_s)
+
+            try:
+                for z_mm in z_values:
+                    self._move_to(x, machine_y_mm, z_mm)
+                    arr = _grab_frame(self.writer, timeout_ms)
+
+                    if arr is None:
+                        continue
+
+                    contrast = float(arr.max()) - float(np.median(arr))
+
+                    if contrast >= self.config.FindBeamContrast_counts:
+                        self._calibration_xz = (x, z_mm)
+                        logger.info(
+                            f"find-beam: structured light at X{x:g} "
+                            f"Z{z_mm:g} (contrast {contrast:.0f} counts) — "
+                            "calibrating and seeding there."
+                        )
+                        return True
+            finally:
+                self.writer._end_acquisition()
+
+            exposure_us *= 8.0
+
+        logger.warning(
+            f"find-beam: no structured light anywhere along Z at X{x:g} "
+            f"after {1 + self.config.FindBeamExposureScalings} exposure "
+            "attempts. Keeping the seed at "
+            f"X{self._calibration_xz[0]:g} Z{self._calibration_xz[1]:g} — "
+            "check the beam is on and the X position crosses it."
+        )
+        return False
+
     # -- per-slice calibration -----------------------------------------
 
     def calibrate_at(
@@ -510,17 +649,30 @@ class AutoScanSession:
         machine_y_mm: float,
         start_exposure_us: float,
     ) -> HeadlessCalibrationResult:
-        calib_x, calib_z = self.config.calibration_xz()
+        calib_x, calib_z = self._calibration_xz
         self._move_to(calib_x, machine_y_mm, calib_z)
 
         timeout_ms = self.writer.config.AcquisitionTimeout_ms
 
+        # Cap calibration exposures at the configured maximum (default
+        # 1 s), NOT the camera's own limit (30 s on the BFS-PGE-31S4M): a
+        # dark calibration point must fail fast with Converged=False, not
+        # ramp into half-minute frames.
+        max_exposure_us = self.calibration_config.Base.MaxExposure_us
+
         self.writer._begin_acquisition()
+
+        # Let the camera finish arming before the first software trigger
+        # (a trigger fired too early is silently dropped -> -1011 timeout).
+        if self.writer.config.TriggerArmDelay_s > 0:
+            time.sleep(self.writer.config.TriggerArmDelay_s)
 
         try:
             result = calibrate_exposure_headless(
                 grab_frame=lambda: _grab_frame(self.writer, timeout_ms),
-                set_exposure_us=lambda us: set_exposure_us(self.writer.cam, us),
+                set_exposure_us=lambda us: set_exposure_us(
+                    self.writer.cam, min(us, max_exposure_us)
+                ),
                 start_exposure_us=start_exposure_us,
                 config=self.calibration_config,
             )
@@ -541,6 +693,8 @@ class AutoScanSession:
             "MachineY_mm": machine_y_mm,
             "BeamY_mm": beam_y_mm,
             "MeasuredFrom": self.config.MeasuredFrom,
+            "CalibrationX_mm": self._calibration_xz[0],
+            "CalibrationZ_mm": self._calibration_xz[1],
             "FinalExposure_us": result.FinalExposure_us,
             "LastMax": result.LastMax,
             "LastSaturatedPixels": result.LastSaturatedPixels,
@@ -576,6 +730,14 @@ class AutoScanSession:
 
         y_values = self.config.y_values_machine_mm()
 
+        logger.info(
+            f"Calibration/seed point: X{self._calibration_xz[0]:g} "
+            f"Z{self._calibration_xz[1]:g} "
+            f"(follow-beam={'on' if self.config.FollowBeam else 'off'}); "
+            f"X caps {self.config.X.start_mm:g}..{self.config.X.stop_mm:g}, "
+            f"Z caps {self.config.Z.start_mm:g}..{self.config.Z.stop_mm:g}"
+        )
+
         exposure_seed_us = getattr(
             self.writer.camera_settings, "ExposureTime", None
         ) or 1000.0
@@ -589,6 +751,10 @@ class AutoScanSession:
                 f"(beam y = {beam_y_mm / 10.0:g} cm after "
                 f"{self.config.MeasuredFrom}) -> {y_name}/"
             )
+
+            if self._need_find_beam:
+                if self.find_beam(machine_y):
+                    self._need_find_beam = False
 
             calibration = self.calibrate_at(machine_y, exposure_seed_us)
             exposure_seed_us = calibration.FinalExposure_us
@@ -627,6 +793,25 @@ class AutoScanSession:
                     background_records,
                     point_metadata,
                 )
+
+                records, raster_metadata = self._label_dark_frames(
+                    y_name, records, raster_metadata
+                )
+
+                if raster_metadata.get("BeamFound") is False:
+                    # Re-arm the sweep so the next slice hunts again.
+                    self._need_find_beam = self.config.FindBeam
+                    logger.warning(
+                        f"Slice {y_name}: NO beam found around the seed at "
+                        f"X{self._calibration_xz[0]:g} "
+                        f"Z{self._calibration_xz[1]:g}. "
+                        + (
+                            "The find-beam sweep will run again next slice."
+                            if self.config.FindBeam
+                            else "Point --calibration-x/--calibration-z at "
+                            "the beam and check the X/Z caps contain it."
+                        )
+                    )
             else:
                 points = self._fixed_grid_points(
                     machine_y, machine_limits, point_metadata
@@ -654,7 +839,45 @@ class AutoScanSession:
 
             logger.info(f"{len(records)} frames -> {y_name}/")
 
+            self._follow_beam(records, background_records)
+
         return self.records
+
+    def _follow_beam(self, records, background_records) -> None:
+        """
+        Move the next slice's calibration point / raster seed to this
+        slice's brightest measured cell (ring beams shift and change
+        radius along Y; a static point can drift into the dark interior).
+        """
+
+        if not self.config.FollowBeam or not records:
+            return
+
+        threshold, _ = self.signal_threshold(background_records)
+        brightest = max(records, key=lambda record: record.Max)
+
+        if brightest.Max <= threshold:
+            logger.warning(
+                "follow-beam: no frame in this slice exceeded the signal "
+                f"threshold ({threshold:g} counts); keeping the calibration "
+                f"point at X{self._calibration_xz[0]:g} "
+                f"Z{self._calibration_xz[1]:g}."
+            )
+            return
+
+        new_xz = (
+            brightest.GantryPosition_mm.x_mm,
+            brightest.GantryPosition_mm.z_mm,
+        )
+
+        if new_xz != self._calibration_xz:
+            logger.info(
+                f"follow-beam: brightest cell (max {brightest.Max}) at "
+                f"X{new_xz[0]:g} Z{new_xz[1]:g} — next slice calibrates and "
+                "seeds there."
+            )
+
+        self._calibration_xz = new_xz
 
     def _fixed_grid_points(
         self,
@@ -723,7 +946,7 @@ class AutoScanSession:
         point_metadata: dict,
     ) -> tuple[list, dict]:
         threshold, threshold_source = self.signal_threshold(background_records)
-        calib_x, calib_z = self.config.calibration_xz()
+        calib_x, calib_z = self._calibration_xz
 
         # Caps: the configured X/Z ranges, further clamped to machine
         # limits. In the raster lattice, lattice-x = machine X and
@@ -780,6 +1003,105 @@ class AutoScanSession:
         )
 
         return result.Records, metadata
+
+    def _label_dark_frames(
+        self, y_name: str, records: list, metadata: dict
+    ) -> tuple[list, dict]:
+        """
+        Rename the raster's no-signal frames (npy + companion jpg) with a
+        '-dark' suffix so they are identifiable in a directory listing,
+        and update the slice + run manifests and the raster metadata to
+        the new paths.
+        """
+
+        cells = metadata.get("Cells", [])
+        dark_paths = {
+            path
+            for cell in cells
+            if not cell.get("AnySignal")
+            for path in cell.get("Paths", [])
+            if path
+        }
+
+        if not dark_paths:
+            return records, metadata
+
+        slice_dir = self.writer.run_dir / y_name
+        mapping: dict[str, str] = {}
+
+        for old_str in dark_paths:
+            old = Path(old_str)
+
+            if old.stem.endswith(DARK_FRAME_SUFFIX):
+                continue  # already labeled (should not happen, but harmless)
+
+            if not old.exists():
+                fallback = slice_dir / old.name
+                if fallback.exists():
+                    old = fallback
+                else:
+                    logger.warning(
+                        f"Cannot label dark frame (file not found): {old_str}"
+                    )
+                    continue
+
+            new = old.with_name(f"{old.stem}{DARK_FRAME_SUFFIX}{old.suffix}")
+
+            try:
+                old.rename(new)
+
+                jpg_old = old.with_suffix(".jpg")
+                if jpg_old.exists():
+                    jpg_old.rename(new.with_suffix(".jpg"))
+            except OSError as ex:
+                logger.warning(f"Could not rename dark frame {old}: {ex}")
+                continue
+
+            # Manifest entries store the ORIGINAL path string.
+            mapping[old_str] = str(Path(old_str).with_name(new.name))
+
+        if not mapping:
+            return records, metadata
+
+        for manifest in (self.writer.manifest_path, slice_dir / "frames.jsonl"):
+            self._rewrite_manifest_paths(manifest, mapping)
+
+        records = [
+            dataclass_replace(record, Path=mapping.get(record.Path, record.Path))
+            for record in records
+        ]
+
+        for cell in cells:
+            cell["Paths"] = [
+                mapping.get(path, path) if path else path
+                for path in cell.get("Paths", [])
+            ]
+
+        logger.info(
+            f"Labeled {len(mapping)} proof-of-darkness frame(s) with the "
+            f"'{DARK_FRAME_SUFFIX}' filename suffix (kept in the dataset)."
+        )
+
+        return records, metadata
+
+    @staticmethod
+    def _rewrite_manifest_paths(manifest_path: Path, mapping: dict[str, str]) -> None:
+        if not manifest_path.exists():
+            logger.warning(
+                f"Manifest {manifest_path} not found while relabeling dark "
+                "frames; its entries keep the old paths."
+            )
+            return
+
+        lines = []
+
+        for line in manifest_path.read_text().splitlines():
+            record = json.loads(line)
+            if record.get("Path") in mapping:
+                record["Path"] = mapping[record["Path"]]
+            lines.append(json.dumps(record))
+
+        manifest_path.write_text("\n".join(lines) + "\n")
 
     def _write_raster_metadata(
         self, y_name: str, machine_y_mm: float, metadata: dict

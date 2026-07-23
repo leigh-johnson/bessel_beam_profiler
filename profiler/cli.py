@@ -4,10 +4,12 @@ import click
 
 from auto_scan_cli import auto_scan
 from calibration_cli import calibrate
+from composite_cli import composite
 from dataset_writer_cli import dataset
 from fluidnc_stage_cli import gantry
 from log_utils import configure_cli_logging
 from preflight_cli import preflight
+from set_limits_cli import set_limits
 
 
 @click.group()
@@ -30,6 +32,8 @@ def cli(log_level: str) -> None:
 
 
 dataset.add_command(auto_scan)
+dataset.add_command(composite)
+gantry.add_command(set_limits)
 
 cli.add_command(dataset)
 cli.add_command(calibrate)

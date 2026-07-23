@@ -297,7 +297,11 @@ class FLIRCameraSettings:
                 strict,
                 messages,
             )
-        if self.AcquisitionFrameRate is not None:
+        # AcquisitionFrameRate is only writable while the limiter is
+        # enabled (on BFS the node goes read-only when
+        # AcquisitionFrameRateEnable is False) — same gating pattern as
+        # GammaEnable/Gamma below.
+        if self.AcquisitionFrameRateEnable and self.AcquisitionFrameRate is not None:
             _set_float(
                 cam,
                 "AcquisitionFrameRate",
