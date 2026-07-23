@@ -161,9 +161,36 @@ def resolve_scan_caps(limits, x_min, x_max, z_min, z_max):
     envvar="SLACK_WEBHOOK_URL",
     default=None,
     show_envvar=True,
-    help="Slack incoming-webhook URL (a secret — prefer the env var over "
-    "the flag). Pings the webhook's channel when each placement finishes "
-    "and the gantry is ready to be repositioned, and on scan failure.",
+    help="Slack incoming-webhook URL (a secret — prefer the env var). "
+    "Pings on placement finish/failure. Superseded by --slack-bot-token "
+    "when both are set.",
+)
+@click.option(
+    "--slack-bot-token",
+    "slack_bot_token",
+    envvar="SLACK_BOT_TOKEN",
+    default=None,
+    show_envvar=True,
+    help="Slack bot token (xoxb-..., a secret — prefer the env var; needs "
+    "chat:write and the bot invited to the channel). Enables the thread "
+    "pattern: one 'scan started' parent per placement, logs streamed as "
+    "batched thread replies, finish ping broadcast to the channel.",
+)
+@click.option(
+    "--slack-channel",
+    "slack_channel",
+    envvar="SLACK_CHANNEL",
+    default="#logs-bessel-beam",
+    show_default=True,
+    show_envvar=True,
+    help="Channel for bot-token posts (webhooks are bound at creation).",
+)
+@click.option(
+    "--slack-log-level",
+    default="INFO",
+    show_default=True,
+    type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"], case_sensitive=False),
+    help="Minimum level of log records streamed to the Slack thread.",
 )
 # -- misc -------------------------------------------------------------------
 @click.option("--metadata", multiple=True, help="Extra manifest metadata as KEY=VALUE. May be repeated.")
@@ -206,6 +233,9 @@ def auto_scan(
     background_count: int,
     skip_background: bool,
     slack_webhook,
+    slack_bot_token,
+    slack_channel: str,
+    slack_log_level: str,
     metadata,
     skip_homing: bool,
 ) -> None:
@@ -318,8 +348,34 @@ def auto_scan(
         else ()
     )
 
+    from notify import slack_config_notice
+
+    notice_level, notice = slack_config_notice(
+        slack_bot_token, slack_webhook, slack_channel
+    )
+    logger.log(notice_level, notice)
+
     placement_number = 1
     current_placement_id = None
+    current_thread = {"ts": None}  # Slack thread of the running placement
+
+    def slack_notify(text: str, broadcast: bool = True) -> None:
+        """Ping via bot token (into the placement thread) or webhook."""
+
+        if slack_bot_token:
+            from notify import post_message
+
+            post_message(
+                slack_bot_token,
+                slack_channel,
+                text,
+                thread_ts=current_thread["ts"],
+                reply_broadcast=broadcast,
+            )
+        elif slack_webhook:
+            from notify import send_slack_message
+
+            send_slack_message(text, slack_webhook)
 
     try:
         while True:
@@ -462,33 +518,58 @@ def auto_scan(
             log_handler = add_file_log(run_dir / "scan.log")
             logger.info(f"Run directory: {run_dir}")
 
+            # Bot token: open the placement's Slack thread and stream the
+            # same log records into it as batched replies.
+            slack_log_handler = None
+            current_thread["ts"] = None
+
+            if slack_bot_token:
+                from log_utils import DATE_FORMAT, LOG_FORMAT
+                from notify import SlackLogHandler, post_message
+
+                current_thread["ts"] = post_message(
+                    slack_bot_token,
+                    slack_channel,
+                    f":satellite_antenna: Scan with placement ID "
+                    f"`{placement_id}` started (`{run_dir.name}`) — logs "
+                    "stream in this thread.",
+                )
+
+                if current_thread["ts"] is not None:
+                    slack_log_handler = SlackLogHandler(
+                        slack_bot_token,
+                        slack_channel,
+                        current_thread["ts"],
+                        level=getattr(logging, slack_log_level.upper()),
+                    )
+                    slack_log_handler.setFormatter(
+                        logging.Formatter(LOG_FORMAT, DATE_FORMAT)
+                    )
+                    logging.getLogger().addHandler(slack_log_handler)
+
             try:
                 records = session.run(stage.config.MachineLimits_mm)
                 logger.info(
                     f"Placement done: {len(records)} frames in {run_dir}"
                 )
             except Exception as ex:
-                if slack_webhook:
-                    from notify import send_slack_message
-
-                    send_slack_message(
-                        f":rotating_light: Scan with placement ID "
-                        f"`{placement_id}` FAILED: {ex}",
-                        slack_webhook,
-                    )
+                slack_notify(
+                    f":rotating_light: Scan with placement ID "
+                    f"`{placement_id}` FAILED: {ex}"
+                )
                 raise
             finally:
                 remove_file_log(log_handler)
 
-            if slack_webhook:
-                from notify import send_slack_message
+                if slack_log_handler is not None:
+                    logging.getLogger().removeHandler(slack_log_handler)
+                    slack_log_handler.close()  # final flush of queued lines
 
-                send_slack_message(
-                    f":bell: Scan with placement ID `{placement_id}` "
-                    f"finished. {len(records)} frames in `{run_dir.name}` — "
-                    "the gantry is ready to be repositioned.",
-                    slack_webhook,
-                )
+            slack_notify(
+                f":bell: Scan with placement ID `{placement_id}` finished. "
+                f"{len(records)} frames in `{run_dir.name}` — the gantry is "
+                "ready to be repositioned."
+            )
 
             # Release the camera before the next placement (PySpin cleanup).
             del session
@@ -516,15 +597,8 @@ def auto_scan(
         except Exception as ex:  # noqa: BLE001 - best-effort safety stop
             click.echo(f"Feed hold failed: {ex}")
 
-        if slack_webhook:
-            from notify import send_slack_message
-
-            which = f" `{current_placement_id}`" if current_placement_id else ""
-            send_slack_message(
-                f":warning: Scan{which} interrupted — gantry is in feed "
-                "hold.",
-                slack_webhook,
-            )
+        which = f" `{current_placement_id}`" if current_placement_id else ""
+        slack_notify(f":warning: Scan{which} interrupted — gantry is in feed hold.")
         click.echo(
             "Machine is holding. Resume from the WebUI (~) or re-home with "
             "'python cli.py gantry home'."
