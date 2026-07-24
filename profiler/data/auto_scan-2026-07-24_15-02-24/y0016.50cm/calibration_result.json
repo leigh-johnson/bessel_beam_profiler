@@ -1,0 +1,13 @@
+{
+  "MachineY_mm": 100.0,
+  "BeamY_mm": 165.0,
+  "MeasuredFrom": "2_1_telescope",
+  "CalibrationX_mm": 45.5,
+  "CalibrationZ_mm": -99.1,
+  "FinalExposure_us": 80693.33333333333,
+  "LastMax": 169,
+  "LastSaturatedPixels": 0,
+  "Iterations": 1,
+  "Converged": true,
+  "Note": ""
+}

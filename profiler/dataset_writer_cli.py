@@ -85,16 +85,41 @@ def _load_camera_settings_for_software_trigger(camera_settings_path: Path | None
     return _force_software_trigger(_load_base_camera_settings(camera_settings_path))
 
 
-def _prompt_optic_configuration() -> dict[str, float]:
+class _FloatOrNone(click.ParamType):
+    """Float that also accepts 'None' (or 'null'/'n/a'/'-') meaning
+    "not applicable for this run" — e.g. GaussianBeamWaist_mm while the
+    input beam is being re-characterized, or the axicon fields when
+    scanning the bare Gaussian input. Stored as JSON null."""
+
+    name = "float or None"
+
+    def convert(self, value, param, ctx):
+        if value is None or isinstance(value, float):
+            return value
+        text = str(value).strip()
+        if text.lower() in {"none", "null", "n/a", "na", "-"}:
+            return None
+        try:
+            return float(text)
+        except ValueError:
+            self.fail(f"{value!r} is not a valid float (or 'None').", param, ctx)
+
+
+FLOAT_OR_NONE = _FloatOrNone()
+
+
+def _prompt_optic_configuration() -> dict[str, float | None]:
     """
     Prompt for the axicon angles and inter-optic spacings of the beamline.
-    ENTER accepts the defaults for the current Bessel-beam setup.
+    ENTER accepts the defaults for the current Bessel-beam setup; type
+    'None' for a field that does not apply to this run (recorded as null).
     """
 
-    click.echo("Optic configuration (ENTER accepts the default):")
+    click.echo("Optic configuration (ENTER accepts the default, 'None' = "
+               "not applicable):")
 
     return {
-        name: click.prompt(f"  {name}", default=default, type=float)
+        name: click.prompt(f"  {name}", default=default, type=FLOAT_OR_NONE)
         for name, default in DEFAULT_OPTIC_CONFIG.items()
     }
 
@@ -382,7 +407,10 @@ def manual(
     #    (plus PNG/NPY of the final frame) beside previous calibrations.
     click.echo("\n--- Step 3/4: exposure calibration ---")
 
-    optic_notes = ", ".join(f"{name}={value:g}" for name, value in optic_config.items())
+    optic_notes = ", ".join(
+        f"{name}={'None' if value is None else format(value, 'g')}"
+        for name, value in optic_config.items()
+    )
     base_settings = replace(
         _load_base_camera_settings(camera_settings_path),
         Notes=f"z={sensor_z_cm:g}cm after {sensor_z_reference}; {optic_notes}",

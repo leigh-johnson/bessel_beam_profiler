@@ -1,0 +1,41 @@
+{
+  "PlacementID": "jul24-inputbeam-001",
+  "CoordinateConvention": "X horizontal transverse, Y beam propagation, Z vertical; machine == table except TableY, anchored to the optic.",
+  "MeasuredSensorY_mm": 340.0,
+  "MeasuredFrom": "60FC-L",
+  "YStart_machine_mm": 10.0,
+  "YStop_machine_mm": 100.0,
+  "YStep_mm": 20.0,
+  "BeamDirectionSign": -1,
+  "X": {
+    "start_mm": 4.0,
+    "stop_mm": 107.0,
+    "step_mm": 5.0
+  },
+  "Z": {
+    "start_mm": -105.1,
+    "stop_mm": 2.0,
+    "step_mm": 4.0
+  },
+  "RasterMode": "adaptive",
+  "NShots": 1,
+  "BackgroundMode": "offaxis",
+  "BackgroundShots": 3,
+  "Metadata": {
+    "OpticConfiguration": {
+      "GaussianBeamWaist_mm": null,
+      "Axicon1_deg": 5.0,
+      "Axicon2_deg": 5.0,
+      "Axicon3_deg": 0.5,
+      "L12_mm": null,
+      "L23_mm": null
+    },
+    "note": "re-determine Gaussian input beam diameter after re-coupling fiber"
+  },
+  "PlacementNotes": "MeasuredSensorY=340mm after 60FC-L at machine Y=10mm; BeamDirectionSign=-1 (machine +Y toward the optic)",
+  "BackgroundXZ_mm": [
+    4.0,
+    -105.1
+  ],
+  "BackgroundExposureChangeFraction": 0.1
+}
