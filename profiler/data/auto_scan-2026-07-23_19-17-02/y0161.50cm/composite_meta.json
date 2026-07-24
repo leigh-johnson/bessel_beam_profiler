@@ -1,0 +1,24 @@
+{
+  "Frames": 4,
+  "PixelSize_um": 3.45,
+  "Downsample": 2,
+  "mm_per_px": 0.006900000000000001,
+  "FlipX": true,
+  "FlipZ": true,
+  "Transpose": false,
+  "BackgroundSubtracted": true,
+  "DarkFramesExcluded": 12,
+  "Extent_mm": {
+    "XMin": 51.9672,
+    "XMax": 64.0353,
+    "ZMin": -97.7516,
+    "ZMax": -88.45039999999999
+  },
+  "CanvasShape": [
+    1348,
+    1749
+  ],
+  "PeakMean_counts": 85.5625,
+  "MachineY_mm": 70.0,
+  "BeamY_mm": 1615.0
+}
