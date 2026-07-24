@@ -59,7 +59,19 @@ class FLIRCameraControllerBase:
         else:
             self.system, self.cam_list, self.cam = _open_camera(camera_index)
 
+        self.camera_index = camera_index
         self.camera_settings = camera_settings
+
+        # Remembered so reopen() can find the SAME camera again even if
+        # enumeration order changes after a bus removal (-1024).
+        self.camera_serial = None
+        try:
+            self.camera_serial = self.cam.TLDevice.DeviceSerialNumber.GetValue()
+        except Exception as ex:  # noqa: BLE001 - serial is best-effort
+            logger.warning(
+                f"Could not read camera serial number ({ex}); reopen() will "
+                "fall back to the camera index."
+            )
 
     def __del__(self):
         try:
@@ -90,6 +102,93 @@ class FLIRCameraControllerBase:
             raise FLIRCameraError("Unable to execute TriggerSoftware.")
 
         command.Execute()
+
+    def reopen(self, retries: int = 5, delay_s: float = 3.0) -> None:
+        """
+        Recover from a bus removal (Spinnaker -1024 "Camera has been
+        removed from the list"): release everything, re-enumerate, find
+        the same camera (by serial, falling back to index), Init, and
+        re-apply the camera settings. Raises FLIRCameraError if the
+        camera does not come back within `retries` attempts.
+        """
+
+        import time
+
+        if self.system is None and self.cam is not None:
+            raise FLIRCameraError(
+                "reopen() is not available for injected test cameras."
+            )
+
+        serial = getattr(self, "camera_serial", None)
+        self.close()
+
+        last_error: Exception | None = None
+
+        for attempt in range(1, retries + 1):
+            system = PySpin.System.GetInstance()
+            cam_list = system.GetCameras()
+            cam = None
+
+            try:
+                if serial:
+                    for index in range(cam_list.GetSize()):
+                        candidate = cam_list.GetByIndex(index)
+                        try:
+                            found = (
+                                candidate.TLDevice.DeviceSerialNumber.GetValue()
+                            )
+                        except Exception as ex:  # noqa: BLE001
+                            logger.warning(
+                                f"Could not read serial of camera {index} "
+                                f"while reconnecting: {ex}"
+                            )
+                            continue
+                        if found == serial:
+                            cam = candidate
+                            break
+
+                if cam is None and cam_list.GetSize() > self.camera_index:
+                    cam = cam_list.GetByIndex(self.camera_index)
+
+                if cam is None:
+                    raise FLIRCameraError(
+                        f"camera (serial {serial!r}) not present on the bus"
+                    )
+
+                cam.Init()
+
+                self.system, self.cam_list, self.cam = system, cam_list, cam
+                self.apply_settings()
+
+                logger.warning(
+                    f"Camera reconnected on attempt {attempt}/{retries} "
+                    f"(serial {serial!r})."
+                )
+                return
+
+            except Exception as ex:  # noqa: BLE001 - retry with cleanup
+                last_error = ex
+                logger.warning(
+                    f"Camera reconnect attempt {attempt}/{retries} failed: {ex}"
+                )
+
+                # Release this attempt's handles before retrying.
+                del cam
+                try:
+                    cam_list.Clear()
+                except Exception as cleanup_ex:  # noqa: BLE001
+                    logger.warning(f"CameraList.Clear during retry: {cleanup_ex}")
+                try:
+                    system.ReleaseInstance()
+                except Exception as cleanup_ex:  # noqa: BLE001
+                    logger.warning(f"ReleaseInstance during retry: {cleanup_ex}")
+
+                time.sleep(delay_s)
+
+        raise FLIRCameraError(
+            f"Camera did not return after {retries} reconnect attempts "
+            f"({delay_s:g}s apart): {last_error}"
+        )
 
     def close(self) -> None:
         """

@@ -167,7 +167,29 @@ def test_post_message_api_error_warns_and_returns_none(monkeypatch, caplog):
         ts = notify.post_message("xoxb-test", "#nope", "hello")
 
     assert ts is None
-    assert any("channel_not_found" in r.message for r in caplog.records)
+    # The warning names the channel and gives an error-specific hint.
+    assert any(
+        "channel_not_found" in r.message and "#nope" in r.message
+        for r in caplog.records
+    )
+
+
+def test_post_message_not_in_channel_hints_at_invite(monkeypatch, caplog):
+    monkeypatch.setattr(
+        notify.urllib.request,
+        "urlopen",
+        lambda request, timeout: make_api_response(
+            {"ok": False, "error": "not_in_channel"}
+        ),
+    )
+
+    with caplog.at_level(logging.WARNING, logger="notify"):
+        assert notify.post_message("xoxb-test", "#logs-bessel-beam", "hi") is None
+
+    assert any(
+        "/invite @BesselBot in #logs-bessel-beam" in r.message
+        for r in caplog.records
+    )
 
 
 def test_post_message_network_error_warns_and_returns_none(monkeypatch, caplog):

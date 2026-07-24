@@ -256,12 +256,32 @@ def _grab_frame(writer, timeout_ms: int) -> Optional[np.ndarray]:
 
     try:
         image_result = writer.cam.GetNextImage(timeout_ms)
-    except Exception as ex:  # noqa: BLE001 - narrow to Spinnaker timeouts
+    except Exception as ex:  # noqa: BLE001 - narrow to Spinnaker failures
+        message = str(ex)
+
+        # Camera dropped off the bus (-1024): reconnect and hand a None
+        # back so the calibration loop re-triggers on the fresh camera.
+        if "-1024" in message or "no longer valid" in message:
+            logger.warning(f"Camera removal during calibration grab: {ex}")
+
+            try:
+                writer._end_acquisition()
+            except Exception as end_ex:  # noqa: BLE001 - dead handle
+                logger.warning(f"EndAcquisition on removed camera: {end_ex}")
+
+            writer.reconnect()
+            writer._begin_acquisition()
+
+            if writer.config.TriggerArmDelay_s > 0:
+                time.sleep(writer.config.TriggerArmDelay_s)
+
+            return None
+
         # A software trigger fired while the camera was still arming can be
         # silently dropped (GenTL -1011 timeout). Treat it like an
         # incomplete frame: the calibration loop re-triggers on the next
         # grab_frame() call and gives up cleanly after its retry limit.
-        if "Spinnaker" in type(ex).__name__ or "-1011" in str(ex):
+        if "Spinnaker" in type(ex).__name__ or "-1011" in message:
             logger.warning(
                 f"Calibration frame grab timed out ({ex}); re-triggering. "
                 "If this repeats, check that SpinView is fully closed."
@@ -317,6 +337,14 @@ class AutoScanSession:
         self.records = []
         self.calibrations: dict[str, HeadlessCalibrationResult] = {}
 
+        # Exposure the camera should be running at RIGHT NOW. After a bus
+        # removal (-1024) the writer's reconnect re-applies the BASE
+        # settings file, which would silently revert a calibrated slice to
+        # the default exposure — so the writer calls this hook to restore
+        # the last deliberately-set exposure after every reconnect.
+        self._current_exposure_us: Optional[float] = None
+        writer.RestoreState = self._restore_camera_state
+
         # Off-axis background reuse state: set whenever a background is
         # actually captured, consulted before capturing the next one.
         self._last_background: Optional[dict[str, Any]] = None
@@ -365,6 +393,33 @@ class AutoScanSession:
 
     def _move_to(self, x_mm: float, machine_y_mm: float, z_mm: float) -> None:
         self.writer._move_and_wait(self._make_point(x_mm, machine_y_mm, z_mm))
+
+    # -- camera state restoration (after -1024 reconnect) ---------------
+
+    def _set_exposure(self, exposure_us: float) -> float:
+        """
+        Set the camera exposure AND remember it, so a mid-scan camera
+        reconnect can restore it (see _restore_camera_state).
+        """
+
+        actual_us = set_exposure_us(self.writer.cam, exposure_us)
+        self._current_exposure_us = actual_us
+        return actual_us
+
+    def _restore_camera_state(self) -> None:
+        """
+        Called by the dataset writer after a camera reconnect: reopen()
+        re-applied the base settings file, so re-apply the exposure this
+        scan was actually running at.
+        """
+
+        if self._current_exposure_us is None:
+            return
+
+        actual_us = set_exposure_us(self.writer.cam, self._current_exposure_us)
+        logger.info(
+            f"Restored scan exposure {actual_us:.1f} us after camera reconnect."
+        )
 
     # -- backgrounds ----------------------------------------------------
 
@@ -545,7 +600,7 @@ class AutoScanSession:
         records = []
 
         for rung_idx, exposure_us in enumerate(exposures):
-            actual_us = set_exposure_us(self.writer.cam, exposure_us)
+            actual_us = self._set_exposure(exposure_us)
 
             point = self._make_point(
                 calib_x,
@@ -596,9 +651,7 @@ class AutoScanSession:
         timeout_ms = self.writer.config.AcquisitionTimeout_ms
 
         for attempt in range(1 + self.config.FindBeamExposureScalings):
-            actual_us = set_exposure_us(
-                self.writer.cam, min(exposure_us, max_exposure_us)
-            )
+            actual_us = self._set_exposure(min(exposure_us, max_exposure_us))
             logger.info(
                 f"find-beam: sweeping Z {z_values[0]:g}..{z_values[-1]:g} at "
                 f"X{x:g}, exposure {actual_us:g} us "
@@ -670,8 +723,8 @@ class AutoScanSession:
         try:
             result = calibrate_exposure_headless(
                 grab_frame=lambda: _grab_frame(self.writer, timeout_ms),
-                set_exposure_us=lambda us: set_exposure_us(
-                    self.writer.cam, min(us, max_exposure_us)
+                set_exposure_us=lambda us: self._set_exposure(
+                    min(us, max_exposure_us)
                 ),
                 start_exposure_us=start_exposure_us,
                 config=self.calibration_config,

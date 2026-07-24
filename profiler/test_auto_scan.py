@@ -784,3 +784,34 @@ def test_beam_direction_default_matches_hardware_verification(modules, tmp_path)
     )
 
     assert config.BeamDirectionSign == -1
+
+
+# ---------------------------------------------------------------------------
+# Camera reconnect: exposure restoration
+# ---------------------------------------------------------------------------
+
+
+def test_session_wires_restore_state_hook(modules, tmp_path):
+    session, writer, _ = make_session(modules, tmp_path)
+
+    assert writer.RestoreState == session._restore_camera_state
+
+
+def test_restore_reapplies_last_deliberate_exposure(modules, tmp_path):
+    session, writer, _ = make_session(modules, tmp_path)
+
+    # No exposure deliberately set yet: restore must be a no-op.
+    writer.cam.ExposureTime.SetValue(25.0)
+    session._restore_camera_state()
+    assert writer.cam.ExposureTime.GetValue() == 25.0
+
+    # After a deliberate set (as calibration / find-beam / ladder do)...
+    session._set_exposure(1234.0)
+    assert writer.cam.ExposureTime.GetValue() == 1234.0
+
+    # ...a reconnect reverts the camera to base settings...
+    writer.cam.ExposureTime.SetValue(1000.0)
+
+    # ...and the hook restores the scan's actual exposure.
+    session._restore_camera_state()
+    assert writer.cam.ExposureTime.GetValue() == 1234.0

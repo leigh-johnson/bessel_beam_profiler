@@ -154,10 +154,22 @@ def post_message(
         return None
 
     if not body.get("ok"):
+        error = body.get("error", body)
+        hint = {
+            "not_in_channel": "the bot is not a member — run /invite "
+            f"@BesselBot in {channel}",
+            "channel_not_found": f"no channel named {channel} visible to "
+            "the bot — check --slack-channel / SLACK_CHANNEL",
+            "invalid_auth": "the bot token is wrong or revoked",
+            "missing_scope": "the token lacks the chat:write scope — add "
+            "it and reinstall the app",
+        }.get(
+            error,
+            "check the bot token scope chat:write and that the bot is "
+            "invited to the channel",
+        )
         logger.warning(
-            f"Slack API rejected the message: {body.get('error', body)} "
-            "(check the bot token scope chat:write and that the bot is "
-            "invited to the channel)."
+            f"Slack API rejected the message to {channel}: {error} ({hint})."
         )
         return None
 

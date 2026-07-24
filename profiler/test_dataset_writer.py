@@ -359,3 +359,148 @@ def test_incomplete_image_releases_and_ends_acquisition(
     assert image.released is True
     assert cam.events == ["begin", "get:2000", "end"]
     assert cam.node_map.GetNode("TriggerSoftware").execute_count == 1
+
+# ---------------------------------------------------------------------------
+# Camera bus removal (-1024): reconnect and retry the shot
+# ---------------------------------------------------------------------------
+
+
+def make_removal_camera(fake_pyspin, images, failures=1):
+    """A camera that reports a bus removal for the first `failures` grabs."""
+
+    class RemovedCamera(FakeCamera):
+        def __init__(self):
+            super().__init__(images=images)
+            self.failures_remaining = failures
+
+        def GetNextImage(self, timeout_ms):
+            if self.failures_remaining:
+                self.failures_remaining -= 1
+                raise fake_pyspin.SpinnakerException(
+                    "Spinnaker: Camera has been removed from the list and "
+                    "is no longer valid. [-1024]"
+                )
+            return super().GetNextImage(timeout_ms)
+
+    return RemovedCamera()
+
+
+def test_camera_removal_reconnects_and_retries_shot(
+    dataset_writer_module,
+    coordinates_module,
+    fake_pyspin,
+    monkeypatch,
+    tmp_path,
+):
+    """One -1024 mid-shot: reconnect, restore state, retry — scan survives."""
+
+    arr = np.array([[9, 9], [9, 9]], dtype=np.uint8)
+    cam = make_removal_camera(fake_pyspin, [FakeImage(arr, frame_id=42)])
+
+    writer = dataset_writer_module.FLIRDatasetWriter(
+        camera_index=0,
+        cam=cam,
+        camera_settings=FakeCameraSettings(),
+        config=dataset_writer_module.DatasetWriterConfig(
+            JobType="unit_test", DatasetRoot=tmp_path, TriggerArmDelay_s=0.0
+        ),
+        stage_controller=FastStageController(),
+    )
+    writer.prepare_run()
+
+    reopens = []
+    monkeypatch.setattr(writer, "reopen", lambda: reopens.append(True))
+
+    restores = []
+    writer.RestoreState = lambda: restores.append(True)
+
+    records = writer.acquire_scan([make_point(coordinates_module, nshots=1)])
+
+    assert len(records) == 1
+    assert records[0].Extra["FrameID"] == 42
+    assert reopens == [True]
+    assert restores == [True]  # RestoreState ran after the reopen
+    # begin -> removal (no get event logged for the failed grab) -> end ->
+    # (reopen) -> begin -> retry get -> end
+    assert cam.events == ["begin", "end", "begin", "get:2000", "end"]
+
+
+def test_persistent_camera_removal_still_raises(
+    dataset_writer_module,
+    coordinates_module,
+    fake_pyspin,
+    monkeypatch,
+    tmp_path,
+):
+    """The removal retry happens exactly once; a dead bus still fails."""
+
+    cam = make_removal_camera(fake_pyspin, images=[], failures=99)
+
+    writer = dataset_writer_module.FLIRDatasetWriter(
+        camera_index=0,
+        cam=cam,
+        camera_settings=FakeCameraSettings(),
+        config=dataset_writer_module.DatasetWriterConfig(
+            JobType="unit_test", DatasetRoot=tmp_path, TriggerArmDelay_s=0.0
+        ),
+        stage_controller=FastStageController(),
+    )
+    writer.prepare_run()
+
+    monkeypatch.setattr(writer, "reopen", lambda: None)
+
+    with pytest.raises(dataset_writer_module.DatasetWriterError, match="-1024"):
+        writer.acquire_scan([make_point(coordinates_module, nshots=1)])
+
+
+def test_restore_state_failure_is_logged_not_raised(
+    dataset_writer_module,
+    monkeypatch,
+    caplog,
+    tmp_path,
+):
+    import logging
+
+    writer = dataset_writer_module.FLIRDatasetWriter(
+        camera_index=0,
+        cam=FakeCamera(images=[]),
+        camera_settings=FakeCameraSettings(),
+        config=dataset_writer_module.DatasetWriterConfig(
+            JobType="unit_test", DatasetRoot=tmp_path
+        ),
+        stage_controller=FastStageController(),
+    )
+
+    monkeypatch.setattr(writer, "reopen", lambda: None)
+
+    def bad_restore():
+        raise RuntimeError("exposure node gone")
+
+    writer.RestoreState = bad_restore
+
+    with caplog.at_level(logging.WARNING, logger="dataset_writer"):
+        writer.reconnect()  # must not raise
+
+    assert any(
+        "RestoreState" in r.message and "exposure node gone" in r.message
+        for r in caplog.records
+    )
+
+
+def test_reopen_unavailable_for_injected_test_camera(
+    dataset_writer_module, tmp_path
+):
+    """Guards against a fake-camera test silently 'reconnecting'."""
+
+    writer = dataset_writer_module.FLIRDatasetWriter(
+        camera_index=0,
+        cam=FakeCamera(images=[]),
+        camera_settings=FakeCameraSettings(),
+        config=dataset_writer_module.DatasetWriterConfig(
+            JobType="unit_test", DatasetRoot=tmp_path
+        ),
+        stage_controller=FastStageController(),
+    )
+
+    with pytest.raises(Exception, match="injected test camera"):
+        writer.reopen()

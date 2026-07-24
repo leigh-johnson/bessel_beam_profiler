@@ -181,6 +181,11 @@ class FLIRDatasetWriter(FLIRCameraControllerBase):
         self.run_dir = self.config.make_run_dir()
         self.manifest_path = self.run_dir / "frames.jsonl"
 
+        # Optional callable invoked after a camera reconnect, for state
+        # that lives on the camera but outside camera_settings (e.g. the
+        # per-slice calibrated exposure set directly on the node).
+        self.RestoreState = None
+
         # `cam` allows dependency injection of a fake camera for unit tests.
         super().__init__(camera_index, camera_settings, cam=cam)
 
@@ -346,15 +351,43 @@ class FLIRDatasetWriter(FLIRCameraControllerBase):
                 if self.signals.StopRequested.is_set():
                     break
 
-                record = self._acquire_one_frame(
-                    point,
-                    shot_idx,
-                )
+                try:
+                    record = self._acquire_one_frame(point, shot_idx)
+                except DatasetWriterError as ex:
+                    if not self._is_camera_removed_error(ex):
+                        raise
+
+                    # Camera dropped off the bus mid-shot (e.g. an
+                    # Ethernet blip on the moving cable run). Position is
+                    # untouched — reconnect and retry this shot once.
+                    logger.warning(
+                        f"Camera removal during shot {shot_idx} at "
+                        f"{point.GantryPosition_mm}: {ex}"
+                    )
+
+                    try:
+                        self._end_acquisition()
+                    except Exception as end_ex:  # noqa: BLE001 - dead handle
+                        logger.warning(
+                            f"EndAcquisition on removed camera: {end_ex}"
+                        )
+
+                    self.reconnect()
+                    self._begin_acquisition()
+
+                    if self.config.TriggerArmDelay_s > 0:
+                        time.sleep(self.config.TriggerArmDelay_s)
+
+                    record = self._acquire_one_frame(point, shot_idx)
+
                 self._append_manifest(record)
                 records.append(record)
 
         finally:
-            self._end_acquisition()
+            try:
+                self._end_acquisition()
+            except Exception as ex:  # noqa: BLE001 - dead handle on the way out
+                logger.warning(f"EndAcquisition during cleanup failed: {ex}")
 
         return records
 
@@ -413,6 +446,31 @@ class FLIRDatasetWriter(FLIRCameraControllerBase):
                 # propagating exception, the camera cannot be released at
                 # cleanup (Spinnaker error -1004).
                 image_result = None
+
+    def reconnect(self) -> None:
+        """
+        Recover the camera after a bus removal (-1024): reopen (by serial),
+        re-apply settings, then restore any runtime camera state via the
+        RestoreState hook (e.g. the slice's calibrated exposure).
+        """
+
+        logger.warning("Camera removed from the bus; attempting reconnect...")
+        self.reopen()
+
+        if self.RestoreState is not None:
+            try:
+                self.RestoreState()
+            except Exception as ex:  # noqa: BLE001 - report, keep scanning
+                logger.warning(
+                    f"RestoreState after camera reconnect failed: {ex} — "
+                    "camera is using the base settings' exposure until the "
+                    "next calibration."
+                )
+
+    @staticmethod
+    def _is_camera_removed_error(ex: Exception) -> bool:
+        message = str(ex)
+        return "-1024" in message or "no longer valid" in message
 
     def _trigger_and_get_image(self, retries: int = 2):
         """
