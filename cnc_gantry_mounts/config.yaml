@@ -44,7 +44,7 @@ axes:
   homing_runs: 2
   x: 
     steps_per_mm: 1600.000000
-    max_rate_mm_per_min: 500.000000
+    max_rate_mm_per_min: 400.000000
     acceleration_mm_per_sec2: 50.000000
     max_travel_mm: 105.000000
     soft_limits: true
@@ -88,7 +88,7 @@ axes:
 
   y: 
     steps_per_mm: 1600.000000
-    max_rate_mm_per_min: 500.000000
+    max_rate_mm_per_min: 400.000000
     acceleration_mm_per_sec2: 50.000000
     max_travel_mm: 130.000000
     soft_limits: true
@@ -104,7 +104,7 @@ axes:
       feed_scaler: 1.100000
 
     motor0: 
-      limit_neg_pin: gpio.35
+      limit_neg_pin: gpio.32
       limit_pos_pin: NO_PIN
       limit_all_pin: NO_PIN
       hard_limits: false
@@ -131,7 +131,7 @@ axes:
         toff_coolstep: 3
 
     motor1: 
-      limit_neg_pin: gpio.34
+      limit_neg_pin: gpio.35
       limit_pos_pin: NO_PIN
       limit_all_pin: NO_PIN
       hard_limits: false
@@ -159,7 +159,7 @@ axes:
 
   z: 
     steps_per_mm: 1600.000000
-    max_rate_mm_per_min: 500.000000
+    max_rate_mm_per_min: 400.000000
     acceleration_mm_per_sec2: 50.000000
     max_travel_mm: 119.100000
     soft_limits: true

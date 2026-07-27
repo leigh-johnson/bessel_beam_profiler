@@ -6,7 +6,7 @@ authors = [{ name = "Leigh Zaman", email = "leighzaman@berkeley.edu" }]
 license = { text = "MIT" }
 readme = "README.md"
 requires-python = ">=3.10,<3.11"
-dependencies = ["spinnaker-python @ file:///Users/leigh/edu/Kolkowitz-Sr/Pi2Su26/bessel_beam_simulator/vendor/spinnaker_python_sdk/spinnaker_python-4.3.0.189-cp310-cp310-macosx_13_0_arm64.whl", "matplotlib (==3.10.9)", "scipy (==1.15.*)", "click (>=8.4.2,<9.0.0)", "pillow (>=12.3.0,<13.0.0)", "numpy (==1.*)", "opencv-python (==4.*)"]
+dependencies = ["spinnaker-python @ file:///Users/leigh/edu/Kolkowitz-Sr/Pi2Su26/bessel_beam_simulator/vendor/spinnaker_python_sdk/spinnaker_python-4.3.0.189-cp310-cp310-macosx_13_0_arm64.whl", "matplotlib (==3.10.9)", "scipy (==1.15.*)", "click (>=8.4.2,<9.0.0)", "pillow (>=12.3.0,<13.0.0)", "numpy (==1.*)", "opencv-python (==4.*)", "streamlit (>=1.60.0,<2.0.0)"]
 
 
 [build-system]
