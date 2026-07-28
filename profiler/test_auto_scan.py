@@ -332,6 +332,58 @@ def test_offaxis_background_position_honors_explicit_config(modules, tmp_path):
     assert session.background_xz(limits) == (10.0, -120.0)
 
 
+def test_axis_range_supports_descending(modules):
+    down = modules.coordinates.AxisRange(
+        start_mm=130.0, stop_mm=115.0, step_mm=5.0
+    )
+    assert down.values() == [130.0, 125.0, 120.0, 115.0]
+
+    # The step's sign is ignored; direction comes from start/stop.
+    down_neg = modules.coordinates.AxisRange(
+        start_mm=130.0, stop_mm=115.0, step_mm=-5.0
+    )
+    assert down_neg.values() == down.values()
+
+    up = modules.coordinates.AxisRange(start_mm=10.0, stop_mm=20.0, step_mm=5.0)
+    assert up.values() == [10.0, 15.0, 20.0]
+
+
+def test_descending_y_scan_walks_downward_with_correct_beam_y(
+    modules, tmp_path
+):
+    # --y-start 30 --y-stop 20: bootstrap near the optic (largest machine
+    # Y on this rig), then walk downward. Beam-y bookkeeping is anchored
+    # at Y-START, so folders still name the true distance from the optic.
+    import dataclasses
+
+    session, writer, pauses = make_session(
+        modules, tmp_path, background_mode="none"
+    )
+    config = dataclasses.replace(
+        session.config, YStart_machine_mm=30.0, YStop_machine_mm=20.0
+    )
+    session = modules.auto_scan.AutoScanSession(
+        writer, config, pause_fn=pauses.append
+    )
+    limits = modules.coordinates.Bounds3D(**LIMITS_KW)
+
+    session.run(limits)
+
+    manifest = load_manifest(writer)
+    scans = [r for r in manifest if r["Extra"]["ScanKind"] == "AutoBeamStack"]
+    machine_ys = [r["GantryPosition_mm"]["y_mm"] for r in scans]
+
+    # First slice at Y30 (the start), then Y20 — descending.
+    assert machine_ys[0] == 30.0
+    assert machine_ys[-1] == 20.0
+    assert set(machine_ys) == {30.0, 20.0}
+
+    # MeasuredSensorY=1000 mm at YStart=30, sign +1: beam y 100 cm at
+    # Y30 and 99 cm at Y20.
+    assert (writer.run_dir / "y0100.00cm").is_dir()
+    assert (writer.run_dir / "y0099.00cm").is_dir()
+
+
 def test_offaxis_run_puts_matched_backgrounds_in_each_slice_folder(modules, tmp_path):
     session, writer, pauses = make_session(
         modules, tmp_path, background_mode="offaxis"

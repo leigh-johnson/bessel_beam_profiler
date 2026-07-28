@@ -114,8 +114,8 @@ def resolve_scan_caps(limits, x_min, x_max, z_min, z_max):
 @click.option("--signal-margin", default=8.0, show_default=True, type=float, help="Adaptive: counts above the background p99 that count as beam signal.")
 @click.option("--min-signal-pixels", default=50, show_default=True, type=click.IntRange(min=1), help="Adaptive: pixels above threshold needed to call a border strip 'signal'.")
 # -- Y stack: stepping along the beam ---------------------------------------
-@click.option("--y-start", default=10.0, show_default=True, type=float, help="Machine Y of the FIRST slice (where you measure the optic->sensor distance).")
-@click.option("--y-stop", default=150.0, show_default=True, type=float, help="Machine Y to scan up to.")
+@click.option("--y-start", default=10.0, show_default=True, type=float, help="Machine Y of the FIRST slice (where you measure the optic->sensor distance). May be LARGER than --y-stop: the scan then walks Y downward — useful for diverging beams, to bootstrap near the optic where the beam is smallest/brightest and track it outward slice by slice.")
+@click.option("--y-stop", default=150.0, show_default=True, type=float, help="Machine Y of the last slice (either side of --y-start).")
 @click.option("--y-step", default=10.0, show_default=True, type=float, help="Beam-direction interval, mm (10 = 1 cm).")
 @click.option(
     "--beam-direction",
