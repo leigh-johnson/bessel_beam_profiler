@@ -17,6 +17,8 @@ import pytest
 # time. They must be re-imported per test so each test's fake PySpin is the
 # one they see; a cached module keeps whichever fake was installed first.
 PYSPIN_DEPENDENT_MODULES = (
+    "align_axicon",
+    "align_preview",
     "auto_scan",
     "calibration",
     "camera_base",

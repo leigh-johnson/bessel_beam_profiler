@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import click
 
+from align_cli import align
 from auto_scan_cli import auto_scan
 from calibration_cli import calibrate
 from composite_cli import composite
@@ -35,6 +36,7 @@ dataset.add_command(auto_scan)
 dataset.add_command(composite)
 gantry.add_command(set_limits)
 
+cli.add_command(align)
 cli.add_command(dataset)
 cli.add_command(calibrate)
 cli.add_command(gantry)
