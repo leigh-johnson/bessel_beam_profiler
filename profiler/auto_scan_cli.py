@@ -398,9 +398,22 @@ def auto_scan(
             )
             current_placement_id = placement_id
 
+            # Drive the camera to the measurement plane BEFORE prompting —
+            # the prompt says "at machine Y = y_start", so the gantry must
+            # actually be there. (Historic bug: with the old default
+            # --y-start 10 the camera sat at home Y=3 and the ~7 mm error
+            # went unnoticed; a descending scan starting at Y=130 would
+            # have made it a 126 mm error.)
+            click.echo(
+                f"Moving the camera to the measurement plane "
+                f"(machine Y = {y_start:g} mm)..."
+            )
+            client.move_machine(y_mm=y_start)
+
             click.echo(
                 f"\nMeasure the distance from the optic to the camera sensor "
-                f"along the beam, with the camera at machine Y = {y_start:g} mm."
+                f"along the beam, with the camera at machine Y = {y_start:g} mm "
+                "(it is there now)."
             )
             measured_cm = click.prompt(
                 "Measured optic -> sensor distance (cm)", type=float
