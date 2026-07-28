@@ -360,6 +360,71 @@ def convergence_check(p, geo, N_lo, N_hi):
                 amp_ratio=float(ca.max() / cb.max()))
 
 
+# Catalogue diameters; the usable clear aperture is this times CA_FRACTION,
+# which is a knob because the check can hinge on it (a 5 deg pair at
+# L12 = 290 mm sits at 92 % of a full 25.4 mm but 102 % of 0.90 x 25.4 mm).
+APERTURES = {
+    'No aperture limit': None,
+    '1" optics': 25.4 * mm,
+    '2" optics': 50.8 * mm,
+}
+
+
+def aperture_check(p, ca_diameter, contain_frac=0.99):
+    """Beam extent at each axicon plane vs the optic's clear aperture.
+
+    Two different criteria, because the beam is a different object at each:
+
+    * AXICON 1 sees the raw Gaussian, whose tail has no hard edge. Clipping at
+      the 1/e^2 radius would already throw away 13.5 % of the light, so the
+      requirement is the radius enclosing ``contain_frac`` of the power,
+      r_F = w sqrt(-ln(1-F)/2).
+    * AXICONS 2 AND 3 see an annulus whose outer edge is set by RAY GEOMETRY,
+      not by a Gaussian tail: a ray entering at height h emerges at
+      |h - beta1 L12|, so the outermost radius belongs to the rays from the
+      beam CENTRE (h -> 0) and equals beta1 L12. Gaussian tail rays (h > w) map
+      to SMALLER radii — they thicken the ring inward and cannot push past that
+      edge — so the ray-traced extent is the correct, hard bound here.
+      (Diffraction spreads the ring slightly beyond it; that is a second-order
+      correction this geometric check does not model.)
+    """
+    w = p["D"] / 2
+    h = np.linspace(1e-4 * w, w, 1500)
+    u = np.zeros_like(h)
+    betas = deflect(np.deg2rad(np.array([p["a1"], p["a2"], p["a3"]])), p["n"])
+    gauss = np.sqrt(-np.log(1.0 - contain_frac) / 2.0)
+    ca_r = None if ca_diameter is None else ca_diameter / 2
+    rows, fails, fills = [], [], []
+    for i, (name, L, b) in enumerate(zip(("axicon 1", "axicon 2", "axicon 3"),
+                                         (0.0, p["L12"], p["L23"]), betas)):
+        h = h + u * L                      # arrive at this element's plane
+        r_env = float(np.abs(h).max())
+        # Gaussian tail only where the beam is still a Gaussian (axicon 1);
+        # after that the annulus edge is a hard ray-optics bound.
+        factor = gauss if i == 0 else 1.0
+        crit = (f"Gaussian, {contain_frac:.1%} power" if i == 0
+                else "ray-traced annulus edge")
+        r_need = factor * r_env
+        fill_pct = None if ca_r is None else 100 * r_need / ca_r
+        rows.append({
+            "plane": name,
+            "criterion": crit,
+            "beam Ø (rays, mm)": round(float(2 * r_env / mm), 2),
+            "needs Ø (mm)": round(float(2 * r_need / mm), 2),
+            "clear aperture Ø (mm)": "—" if ca_r is None
+                                     else round(float(2 * ca_r / mm), 2),
+            "fill": "—" if ca_r is None else f"{fill_pct:.0f} %",
+            "verdict": "—" if ca_r is None
+                       else ("OK" if r_need <= ca_r else "OVERFILLS")})
+        if ca_r is not None:
+            fills.append(fill_pct)
+            if r_need > ca_r:
+                fails.append((name, 2 * r_need, 2 * ca_r))
+        u = u - b * np.where(h == 0, 1.0, np.sign(h))   # then refract
+    worst_fill = None if not fills else f"{max(fills):.0f} %"
+    return rows, fails, worst_fill
+
+
 # ----------------------------------------------------------------------------
 # UI
 # ----------------------------------------------------------------------------
@@ -371,12 +436,17 @@ def main():
         st.header("Design Parameters")
         st.caption("Design parameters are used for both the geometric and wave-optics models.")
         lam_nm = st.selectbox("Wavelength (nm)", (650.0, 698.0), index=0)
-        D_mm = st.number_input("Input 1/e² diameter D (mm)", 1.0, 25.0, 9.50, 0.25)
+        D_mm = st.number_input("Input 1/e² diameter D (mm)", 1.0, 50.0, 9.50, 0.25)
         a1 = st.number_input("Axicon 1 base angle (deg)", 0.01, 20.0, 5.0, 0.1)
         a2 = st.number_input("Axicon 2 base angle (deg)", 0.01, 20.0, 5.0, 0.1)
         a3 = st.number_input("Axicon 3 base angle (deg)", 0.01, 20.0, 0.5, 0.05)
         L12_mm = st.number_input("L₁₂ (mm)", 10.0, 3000.0, 300.0, 10.0)
         L23_mm = st.number_input("L₂₃ (mm)", 1.0, 1000.0, 50.0, 5.0)
+        optic_size = st.selectbox("Axicon optic size", list(APERTURES),
+                                  index=1,
+                                  help="Checked at all three axicon planes. "
+                                       "The usable clear aperture fraction is "
+                                       "set under Definitions.")
         with st.expander("QDHT & wave optic parameters"):
             N = st.selectbox("QDHT N", (2048, 4096, 8192, 16384), index=1,
                              help="Radial grid size. 16384 needs ~2.1 GB and "
@@ -391,11 +461,28 @@ def main():
                                 0.99, 0.001)
             enc_in = st.slider("Mirror #2 max power (sets void zone)", 0.001, 0.10, 0.01, 0.001)
             r_near_um = st.slider("Near-axis radius (µm)", 25, 400, 150, 25)
+            ap_contain = st.slider("Aperture check: power that must fit "
+                                   "(axicon 1 only)",
+                                   0.865, 0.999, 0.99, 0.001,
+                                   help="Applies to the Gaussian at axicon 1. "
+                                        "0.865 = the bare 1/e² diameter; "
+                                        "0.99 ≈ 1.5x that radius; "
+                                        "0.999 ≈ 1.86x. Axicons 2 and 3 use the "
+                                        "hard ray-traced annulus edge instead.")
+            ca_frac = st.slider("Clear aperture as a fraction of optic diameter",
+                                0.80, 1.00, 0.90, 0.01,
+                                help="Vendors typically quote >= 90 %. Marginal "
+                                     "configurations can hinge on this: a 5° "
+                                     "pair at L₁₂ = 290 mm is 102 % of a 0.90 "
+                                     "CA but 92 % of the full 25.4 mm.")
         run = st.button("Run wave optics", type="primary", use_container_width=True)
 
     p = dict(lam=lam_nm * 1e-9, D=D_mm * mm, a1=a1, a2=a2, a3=a3, n=n_glass,
              L12=L12_mm * mm, L23=L23_mm * mm, N=int(N), Nz3=int(Nz3),
              pad_w0=pad_w0, enc_out=enc_out, enc_in=enc_in, r_near=r_near_um * UM)
+    _ap_d = APERTURES[optic_size]
+    ap_rows, ap_fails, ap_fill = aperture_check(
+        p, None if _ap_d is None else ca_frac * _ap_d, ap_contain)
 
     geo = geometric(p)
 
@@ -420,6 +507,33 @@ def main():
                     f"{geo['z_clear'] - geo['z_end']:.2f} m past range end",
                     delta_color="off")
         c2[2].metric("Final cone angle $\\theta$", f"{geo['th_end']/MRAD:.2f} mrad")
+    if ap_fails:
+        worst = ", ".join(f"**{n}** needs Ø{d/mm:.1f} mm but the optic passes "
+                          f"only Ø{c/mm:.1f} mm" for n, d, c in ap_fails)
+        st.error(f"Beam clipsthe {optic_size.split(' optics')[0]} clear "
+                 f"aperture at {len(ap_fails)} of 3 planes — {worst}.")
+    elif ap_fill is not None:
+        st.caption(f"Aperture check: fits {optic_size.split(' optics')[0]} "
+                   f"optics at all three planes — tightest fill {ap_fill} of "
+                   f"the clear aperture.")
+    with st.expander("Aperture check detail"):
+        st.markdown(
+            f"Beam extent at each element versus the optic's clear aperture, "
+            f"taken as {ca_frac:.0%} of the catalogue diameter.\n\n"
+            f"The two planes use different criteria because the beam is a "
+            f"different object at each. **Axicon 1** sees the raw Gaussian, "
+            f"whose tail has no hard edge, so the requirement is the radius "
+            f"enclosing {ap_contain:.1%} of the power — clipping at the bare "
+            f"1/e² diameter would already cost 13.5 % of the light. "
+            f"**Axicons 2 and 3** see an annulus whose outer edge is a hard "
+            f"ray-optics bound at $\\beta_1 L_{{12}}$: rays entering at height "
+            f"$h$ arrive at $|h - \\beta_1 L_{{12}}|$, so the outermost radius "
+            f"belongs to rays from the beam *centre*, and Gaussian tail rays "
+            f"($h > w$) land at *smaller* radii — they thicken the ring inward "
+            f"and cannot push past that edge. Diffraction spreads the ring a "
+            f"little beyond it, which this geometric check does not model.")
+        st.dataframe(ap_rows, hide_index=True, use_container_width=True)
+
     st.warning("Diagram objects are NOT to scale. axes are in meters (z) and millimeters (r).")
     st.pyplot(ray_diagram(p, geo), use_container_width=True)
     with st.expander("How the geometric Bessel range is determined"):
