@@ -114,6 +114,15 @@ def resolve_scan_caps(limits, x_min, x_max, z_min, z_max):
 @click.option("--signal-margin", default=8.0, show_default=True, type=float, help="Adaptive: counts above the background p99 that count as beam signal.")
 @click.option("--min-signal-pixels", default=50, show_default=True, type=click.IntRange(min=1), help="Adaptive: pixels above threshold needed to call a border strip 'signal'.")
 # -- Y stack: stepping along the beam ---------------------------------------
+@click.option(
+    "--preview/--no-preview",
+    default=False,
+    show_default=True,
+    help="Open a live viewer (separate process) showing each frame as it "
+    "is saved. The viewer only reads files — it cannot slow or block "
+    "the capture loop, and closing it does not affect the scan. "
+    "Equivalent to running `dataset watch <run_dir>` yourself.",
+)
 @click.option("--y-start", default=10.0, show_default=True, type=float, help="Machine Y of the FIRST slice (where you measure the optic->sensor distance). May be LARGER than --y-stop: the scan then walks Y downward — useful for diverging beams, to bootstrap near the optic where the beam is smallest/brightest and track it outward slice by slice.")
 @click.option("--y-stop", default=150.0, show_default=True, type=float, help="Machine Y of the last slice (either side of --y-start).")
 @click.option("--y-step", default=10.0, show_default=True, type=float, help="Beam-direction interval, mm (10 = 1 cm).")
@@ -219,6 +228,7 @@ def auto_scan(
     find_beam: bool,
     signal_margin: float,
     min_signal_pixels: int,
+    preview: bool,
     y_start: float,
     y_stop: float,
     y_step: float,
@@ -377,6 +387,14 @@ def auto_scan(
 
             send_slack_message(text, slack_webhook)
 
+    preview_process = None
+
+    def stop_preview() -> None:
+        nonlocal preview_process
+        if preview_process is not None and preview_process.poll() is None:
+            preview_process.terminate()
+        preview_process = None
+
     try:
         while True:
             click.echo(f"\n=== Placement {placement_number} ===")
@@ -520,6 +538,28 @@ def auto_scan(
 
             run_dir = writer.prepare_run()
 
+            # Live viewer in its OWN process: it tails run_dir and shows
+            # frames as they are saved. File-reads only — it cannot slow
+            # or block this capture loop, and its death is harmless.
+            if preview:
+                import subprocess
+                import sys
+
+                preview_process = subprocess.Popen(
+                    [
+                        sys.executable,
+                        str(Path(__file__).resolve().parent / "cli.py"),
+                        "dataset",
+                        "watch",
+                        str(run_dir),
+                    ]
+                )
+                logger.info(
+                    f"Live preview watching {run_dir} "
+                    f"(pid {preview_process.pid}; closing it does not "
+                    "affect the scan)."
+                )
+
             session = AutoScanSession(
                 writer,
                 config,
@@ -572,6 +612,7 @@ def auto_scan(
                 )
                 raise
             finally:
+                stop_preview()
                 remove_file_log(log_handler)
 
                 if slack_log_handler is not None:
@@ -619,4 +660,5 @@ def auto_scan(
         raise
 
     finally:
+        stop_preview()  # covers interrupts before/around the scan body
         client.close()

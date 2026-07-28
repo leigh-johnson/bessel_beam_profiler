@@ -204,6 +204,24 @@ describes. For `dataset auto`, each placement's run directory gets its own
 scan.log (the handler swaps when a new placement starts). Interactive
 prompts and plan confirmations remain plain console output.
 
+## Live preview (`--preview` / `dataset watch`)
+
+`dataset auto --preview` opens a live viewer showing each frame as it is
+saved (filename, peak counts, timestamp). It runs as a SEPARATE process
+that tails the run directory — file reads only, never the camera — so it
+cannot slow, block, or crash the capture loop; closing the window has no
+effect on the scan. You can equivalently run it by hand, from a second
+terminal, at any time during or after a scan:
+
+```
+python cli.py dataset watch                    # newest run under data/
+python cli.py dataset watch <run_dir>          # a specific run
+```
+
+Mid-write files are retried on the next tick, and dark-frame renames are
+picked up automatically. The viewer shows every .npy the scan writes,
+including background and '-dark' frames (the title tells you which).
+
 ## Defaults worth knowing
 
 * Feed 400 mm/min (machine max_rate is 500); 0.2 s settle after Idle.

@@ -10,6 +10,7 @@ from dataset_writer_cli import dataset
 from fluidnc_stage_cli import gantry
 from log_utils import configure_cli_logging
 from preflight_cli import preflight
+from scan_preview_cli import watch_command
 from set_limits_cli import set_limits
 
 
@@ -34,6 +35,7 @@ def cli(log_level: str) -> None:
 
 dataset.add_command(auto_scan)
 dataset.add_command(composite)
+dataset.add_command(watch_command)
 gantry.add_command(set_limits)
 
 cli.add_command(align)
