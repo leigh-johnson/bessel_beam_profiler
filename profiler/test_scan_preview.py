@@ -57,6 +57,24 @@ def test_watch_headless_displays_frames_and_updates(tmp_path):
     assert shown == 1
 
 
+def test_show_frame_survives_rename_race(tmp_path):
+    # The scan renames no-signal frames to '-dark' after each raster, so
+    # a path picked by find_latest_frame can vanish before display
+    # (crashed the viewer on hardware 2026-07-28). show_frame must
+    # return False, not raise.
+    frame = _write_frame(tmp_path / "y0029.60cm" / "shot0000.npy", 40)
+
+    window = scan_preview.ScanPreviewWindow(display=False)
+    try:
+        assert window.show_frame(frame, tmp_path) is True
+
+        frame.unlink()  # the relabeling race, made deterministic
+
+        assert window.show_frame(frame, tmp_path) is False
+    finally:
+        window.close()
+
+
 def test_watch_tolerates_unreadable_midwrite_file(tmp_path):
     now = time.time()
     good = _write_frame(tmp_path / "good.npy", 50, mtime=now - 10)

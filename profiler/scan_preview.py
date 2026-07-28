@@ -85,9 +85,14 @@ class ScanPreviewWindow:
     def show_frame(self, path: Path, run_dir: Path) -> bool:
         """Display one saved frame; False if it could not be read."""
 
+        # Stat ONCE, inside the guard: the scan renames no-signal frames
+        # to '-dark' after each raster, so the path can vanish between
+        # any two filesystem calls (hardware-observed 2026-07-28 — a
+        # second bare stat() for the title crashed the viewer mid-scan).
         try:
+            mtime = path.stat().st_mtime
             frame = np.load(path)
-        except Exception as ex:  # noqa: BLE001 - mid-write race is expected
+        except Exception as ex:  # noqa: BLE001 - mid-write/rename races
             logger.debug(
                 f"Frame {path.name} not readable yet ({ex}); will retry "
                 "on the next tick."
@@ -123,7 +128,7 @@ class ScanPreviewWindow:
 
         self.ax.set_title(
             f"{label}\npeak {frame.max():g}   "
-            f"{time.strftime('%H:%M:%S', time.localtime(path.stat().st_mtime))}"
+            f"{time.strftime('%H:%M:%S', time.localtime(mtime))}"
         )
         self.figure.canvas.draw_idle()
         return True
