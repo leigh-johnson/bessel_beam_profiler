@@ -204,6 +204,22 @@ describes. For `dataset auto`, each placement's run directory gets its own
 scan.log (the handler swaps when a new placement starts). Interactive
 prompts and plan confirmations remain plain console output.
 
+## WiFi drop-offs and auto-reconnect
+
+The ESP32 rides the moving gantry on WiFi, so link drop-offs are
+expected. The client auto-heals them: on a socket error or status
+timeout it reconnects (5 attempts, 2 s apart, configurable via
+`ReconnectAttempts`/`ReconnectDelay_s`) and retries the operation once.
+This is safe because status queries are read-only and all motion is
+absolute G53 — a re-sent move is idempotent. A mere WiFi blip is
+invisible to the scan (buffered motion keeps executing on the board;
+polling resumes after reconnect). A controller REBOOT (power blip, not
+just WiFi) is different: the board comes back in Alarm with position
+lost — the client detects this, logs it loudly, and lets the next
+motion command fail rather than moving blind; re-home and restart the
+placement. Protocol-level replies (`error:N`, `ALARM:n`) never trigger
+reconnects — those mean the link is fine.
+
 ## Live preview (`--preview` / `dataset watch`)
 
 `dataset auto --preview` opens a live viewer showing each frame as it is
