@@ -58,6 +58,13 @@ logger = logging.getLogger(__name__)
     "2026-07-22). Only the tilt sign depends on this.",
 )
 @click.option(
+    "--notes",
+    multiple=True,
+    help="Free-text note recorded in the run's align_session.json (e.g. "
+    "\"camera y2 at L_12=290mm\"). Repeatable: pass --notes several "
+    "times to record several notes.",
+)
+@click.option(
     "--optic",
     default="axicon3",
     show_default=True,
@@ -77,7 +84,8 @@ logger = logging.getLogger(__name__)
     "ring + the center so the composite has no blind spot in the middle "
     "(interior frames are display-only — excluded from the ring fit).",
 )
-@click.option("--ring-diameter", default=None, type=float, help="Expected ring diameter (mm) — sanity bound for the chord survey, not required.")
+@click.option("--ring-diameter", default=None, type=float, help="Expected ring diameter (mm) at the --y plane — sanity bound for the chord survey, not required.")
+@click.option("--ring-diameter2", default=None, type=float, help="Expected ring diameter (mm) at the --y2 plane, when it differs from --ring-diameter (diverging cone, e.g. after axicon 1). Defaults to --ring-diameter.")
 @click.option("--survey-dx", default=5.0, show_default=True, type=float, help="X offset between the two bootstrap survey columns.")
 @click.option("--max-shift", default=3.0, show_default=True, type=click.FloatRange(min=0.1), help="Max ring-estimate change per lap (mm) after the first fit; raise for beams you expect to move a lot per adjustment.")
 @click.option("--max-exposure", default=None, type=click.FloatRange(min=100.0), help="Hard exposure ceiling (us). Dim beams otherwise calibrate to very long exposures; the background-referenced threshold detects dim rings fine, so capping (e.g. 100000) buys lap/stream speed.")
@@ -123,11 +131,13 @@ def align(
     machine_y: float,
     machine_y2,
     beam_direction: str,
+    notes: tuple,
     optic: str,
     probe_x,
     stations: int,
     cover: str,
     ring_diameter,
+    ring_diameter2,
     survey_dx: float,
     max_shift: float,
     max_exposure,
@@ -254,6 +264,7 @@ def align(
             "align_session.json",
             {
                 "Optic": optic,
+                "Notes": list(notes),
                 "Mode": mode,
                 "MachineY_mm": machine_y,
                 "MachineY2_mm": machine_y2,
@@ -262,6 +273,9 @@ def align(
                 "RingDiameterPrior_mm": ring_diameter,
             },
         )
+        if notes:
+            for note in notes:
+                logger.info(f"Run note: {note}")
 
         config = AlignConfig(
             MachineY_mm=machine_y,
@@ -271,6 +285,7 @@ def align(
             Stations=stations,
             CoverMode=cover,
             RingDiameter_mm=ring_diameter,
+            RingDiameter2_mm=ring_diameter2,
             SurveyDX_mm=survey_dx,
             MaxRingShift_mm=max_shift,
             MaxExposure_us=max_exposure,

@@ -132,6 +132,21 @@ In the composite, GRAY pixels mean "no station frame imaged here"
 through yellow is actual beam data. For a gap-free full image of the
 plane, use `dataset auto`, which rasters the whole slice.
 
+## Diverging cones (e.g. after axicon 1)
+
+Each Y plane bootstraps and tracks its own radius, so a cone whose
+diameter grows along the beam works out of the box. Two things help:
+
+- Per-plane priors: `--ring-diameter <d at --y> --ring-diameter2
+  <d at --y2>` (the prior is only a sanity gate on the chord survey;
+  without `--ring-diameter2` the `--y` value gates both planes).
+- The two-plane run reports **cone** (mrad, + = ring expands going
+  downstream): the radius spread rate between the planes. After
+  axicon 1 this measures the deflection angle directly (compare to
+  (n-1)*alpha); after axicon 2 it should read ~0 (collimation check).
+  Remember the radius is the band's intensity-weighted centroid and is
+  exposure-sensitive — pin `--max-exposure` when comparing.
+
 ## Other optics (e.g. after axicon 2)
 
 The tool is optic-agnostic — it finds and fits whatever ring the
@@ -154,6 +169,11 @@ to axicon 3), tag the run with `--optic axicon2` and prefer
   mode a failed re-find (beam blocked) logs, backs off, and keeps
   streaming rather than dying — unblock the beam and it recovers.
 - Ctrl-C sends a feed hold (`!`) to the gantry, same as `dataset auto`.
+
+Tag runs with what you changed on the bench so the run directories are
+interpretable later: `--optic axicon2 --notes "camera y2 at L_12=290mm"
+--notes "walked input mirror +1/4 turn CW"` — every `--notes` string is
+recorded in the run's `align_session.json` and echoed into `align.log`.
 
 ## Outputs
 

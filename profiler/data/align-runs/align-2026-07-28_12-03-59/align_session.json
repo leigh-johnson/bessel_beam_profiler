@@ -1,0 +1,12 @@
+{
+  "Optic": "axicon1",
+  "Notes": [
+    "camera y2=130 at L_12=400mm"
+  ],
+  "Mode": "patrol",
+  "MachineY_mm": 90.0,
+  "MachineY2_mm": 130.0,
+  "BeamDirection": "-y",
+  "Stations": 32,
+  "RingDiameterPrior_mm": 28.0
+}

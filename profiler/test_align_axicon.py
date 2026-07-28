@@ -72,15 +72,19 @@ LIMITS_KW = dict(
 class RingScene:
     """Renders the machine-frame view of the ring at a gantry position."""
 
-    def __init__(self, center_fn=None, **overrides):
+    def __init__(self, center_fn=None, scale_fn=None, **overrides):
         self.params = {**RING, **overrides}
         # center_fn(machine_y) -> (cx, cz): lets tests give the ring a
         # pointing tilt along the beam.
         self.center_fn = center_fn or (lambda y: self.params["center"])
+        # scale_fn(machine_y) -> multiplier on the ring size: lets tests
+        # model a diverging cone (radius growing along the beam).
+        self.scale_fn = scale_fn or (lambda y: 1.0)
 
     def render(self, x_c, z_c, machine_y, exposure_us):
         p = self.params
         cx, cz = self.center_fn(machine_y)
+        scale = self.scale_fn(machine_y)
 
         mm_per_px = PIXEL_UM / 1000.0
         width_mm = SENSOR_COLS * mm_per_px
@@ -96,7 +100,7 @@ class RingScene:
         rho = np.hypot(dx, dz)
 
         tilt = math.radians(p["tilt_deg"])
-        a, b = p["semi_major"], p["semi_minor"]
+        a, b = p["semi_major"] * scale, p["semi_minor"] * scale
         phi_rot = phi - tilt
         ring_radius = a * b / np.sqrt(
             (b * np.cos(phi_rot)) ** 2 + (a * np.sin(phi_rot)) ** 2
@@ -491,6 +495,53 @@ def test_two_plane_patrol_reports_pointing_tilt(modules, tmp_path):
     assert tilt is not None
     assert abs(tilt.TiltX_mrad - 10.0) < 1.0
     assert abs(tilt.TiltZ_mrad) < 1.0
+
+
+def test_diverging_cone_two_planes_reports_cone_angle(modules, tmp_path):
+    # After axicon 1 the annulus grows along the beam: ~20%/40 mm here
+    # (r 4.5 -> 5.4 between Y20 and Y60 => +22.5 mrad cone with the
+    # beam along +Y). Per-plane ring-diameter priors must both accept,
+    # and the cone readout must recover the spread rate.
+    def scale_fn(machine_y):
+        return 1.0 + 0.005 * (machine_y - 20.0)
+
+    session, writer, scene = make_session(
+        modules,
+        tmp_path,
+        scene=RingScene(scale_fn=scale_fn),
+        MachineY2_mm=60.0,
+        BeamDirectionSign=1,
+        RingDiameter_mm=9.0,
+        RingDiameter2_mm=10.8,
+    )
+
+    results = run_cycles(session, 4)
+
+    r1 = session.estimates[20.0].Radius_mm
+    r2 = session.estimates[60.0].Radius_mm
+    assert r2 > r1 + 0.5  # the cone genuinely diverges
+
+    tilt = results[-1][0].Tilt
+    assert tilt is not None
+    expected_cone = (r2 - r1) / 40.0 * 1000.0
+    assert tilt.Cone_mrad is not None
+    assert abs(tilt.Cone_mrad - expected_cone) < 1.0
+    assert abs(tilt.Cone_mrad - 22.5) < 5.0
+
+
+def test_sane_radius_uses_per_plane_prior(modules, tmp_path):
+    session, writer, scene = make_session(
+        modules,
+        tmp_path,
+        MachineY2_mm=60.0,
+        RingDiameter_mm=9.0,
+        RingDiameter2_mm=30.0,
+    )
+
+    # 4.5 mm radius: sane vs the 9 mm-diameter prior at plane 1, but
+    # far below the 30 mm prior at plane 2 -> replaced by that prior.
+    assert session._sane_radius(4.5, 20.0) == 4.5
+    assert session._sane_radius(4.5, 60.0) == 15.0
 
 
 def test_bootstrap_raises_when_beam_is_off(modules, tmp_path):

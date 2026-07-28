@@ -88,8 +88,11 @@ class AlignConfig:
     CoverMode: str = "ring"
 
     # Optional prior on the ring size (sanity bound only; the chord
-    # bootstrap measures the actual radius).
+    # bootstrap measures the actual radius). RingDiameter2_mm applies at
+    # the MachineY2_mm plane — a diverging cone (e.g. after axicon 1)
+    # has a different diameter at each plane.
     RingDiameter_mm: Optional[float] = None
+    RingDiameter2_mm: Optional[float] = None
 
     # Chord-bootstrap survey columns: X offset between the two columns.
     SurveyDX_mm: float = 5.0
@@ -732,6 +735,10 @@ class TiltMetrics:
     TiltX_mrad: float
     TiltZ_mrad: float
     DeltaBeamPath_mm: float
+    # Radius change per unit beam path (mrad): + = ring expands going
+    # downstream. After axicon 1 this IS the cone half-angle spread; in
+    # a collimated relay (after axicon 2) it should read ~0.
+    Cone_mrad: Optional[float] = None
 
 
 @dataclass(frozen=True)
@@ -1034,7 +1041,7 @@ class AxiconAlignSession:
 
             if solution is not None:
                 cx, cz, radius = solution
-                radius = self._sane_radius(radius)
+                radius = self._sane_radius(radius, machine_y_mm)
                 return RingEstimate(cx, cz, radius)
 
         raise AlignError(
@@ -1043,14 +1050,23 @@ class AxiconAlignSession:
             "provide --ring-diameter."
         )
 
-    def _sane_radius(self, radius: float) -> float:
-        if self.config.RingDiameter_mm is not None:
-            prior = self.config.RingDiameter_mm / 2.0
+    def _sane_radius(self, radius: float, machine_y_mm: float) -> float:
+        diameter = self.config.RingDiameter_mm
+        if (
+            self.config.MachineY2_mm is not None
+            and machine_y_mm == self.config.MachineY2_mm
+            and self.config.RingDiameter2_mm is not None
+        ):
+            diameter = self.config.RingDiameter2_mm
+
+        if diameter is not None:
+            prior = diameter / 2.0
             if not (0.4 * prior <= radius <= 2.5 * prior):
                 logger.warning(
-                    f"Chord-survey radius {radius:.2f} mm is far from the "
-                    f"--ring-diameter prior ({prior:.2f} mm); using the "
-                    "prior for the first patrol."
+                    f"Chord-survey radius {radius:.2f} mm at Y"
+                    f"{machine_y_mm:g} is far from the ring-diameter "
+                    f"prior ({prior:.2f} mm); using the prior for the "
+                    "first patrol."
                 )
                 return prior
         return radius
@@ -1324,10 +1340,20 @@ class AxiconAlignSession:
 
         c1 = self.centers[y1]
         c2 = self.centers[y2]
+
+        cone = None
+        if y1 in self.estimates and y2 in self.estimates:
+            cone = (
+                (self.estimates[y2].Radius_mm - self.estimates[y1].Radius_mm)
+                / delta_beam
+                * 1000.0
+            )
+
         return TiltMetrics(
             TiltX_mrad=(c2[0] - c1[0]) / delta_beam * 1000.0,
             TiltZ_mrad=(c2[1] - c1[1]) / delta_beam * 1000.0,
             DeltaBeamPath_mm=delta_beam,
+            Cone_mrad=cone,
         )
 
     # -- user actions ---------------------------------------------------

@@ -425,6 +425,11 @@ class AlignPreview:
                 f"Z {tilt.TiltZ_mrad:+6.2f} mrad "
                 f"(dY {tilt.DeltaBeamPath_mm:+.0f} mm)"
             )
+            if getattr(tilt, "Cone_mrad", None) is not None:
+                lines.append(
+                    f"cone     {tilt.Cone_mrad:+6.2f} mrad "
+                    "(+ = ring expands downstream)"
+                )
         elif self.config.MachineY2_mm is not None:
             lines.append("tilt     —  (waiting for both Y planes)")
 
