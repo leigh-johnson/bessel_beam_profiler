@@ -48,6 +48,7 @@ import numpy as np
 
 from adaptive_raster import AdaptiveRasterConfig, AdaptiveRasterRunner
 from coordinates import AxisRange, ScanPoint, Vec3D
+from calibration import robust_max
 from headless_calibration import (
     HeadlessCalibrationConfig,
     HeadlessCalibrationResult,
@@ -671,7 +672,11 @@ class AutoScanSession:
                     if arr is None:
                         continue
 
-                    contrast = float(arr.max()) - float(np.median(arr))
+                    # Hot-pixel-robust max: a defective pixel's dark
+                    # current scales with exposure and fakes "structured
+                    # light" at every sweep stop otherwise (see
+                    # calibration.robust_max).
+                    contrast = float(robust_max(arr)) - float(np.median(arr))
 
                     if contrast >= self.config.FindBeamContrast_counts:
                         self._calibration_xz = (x, z_mm)

@@ -771,6 +771,43 @@ def flat_image(value):
     return FakeImage(np.full((12, 16), value, dtype=np.uint8))
 
 
+def test_robust_max_ignores_isolated_hot_pixels(modules):
+    # 512x512 = 262k px -> hot allowance 5. Two hot pixels (the real
+    # sensor's defect pattern, 2026-07-28) must not register; a genuine
+    # blob (thousands of px) must.
+    dark = np.zeros((512, 512), dtype=np.uint8)
+    dark[10, 10] = 151
+    dark[400, 300] = 148
+    assert modules.auto_scan.robust_max(dark) == 0
+
+    blob = dark.copy()
+    blob[200:260, 200:260] = 140  # 3600-px real feature
+    assert modules.auto_scan.robust_max(blob) == 140
+
+    # Tiny frames (test fakes): plain max, no allowance.
+    small = np.zeros((12, 16), dtype=np.uint8)
+    small[4, 6] = 150
+    assert modules.auto_scan.robust_max(small) == 150
+
+
+def test_find_beam_rejects_hot_pixels_on_dark_sensor(modules, tmp_path):
+    # Frames dark except 2 hot pixels whose counts scale with exposure —
+    # the exact 2026-07-28 failure. find_beam must give up (return
+    # False), not seed a scan at the first sweep stop.
+    def hot_frame():
+        arr = np.zeros((512, 512), dtype=np.uint8)
+        arr[10, 10] = 151
+        arr[400, 300] = 148
+        return FakeImage(arr)
+
+    # 3 sweep stops x (1 + FindBeamExposureScalings) attempts.
+    session, writer = make_find_beam_session(
+        modules, tmp_path, images=[hot_frame() for _ in range(9)]
+    )
+
+    assert session.find_beam(20.0) is False
+
+
 def test_find_beam_sweeps_far_end_first_and_seeds_at_contrast(modules, tmp_path):
     # Stops swept: -90 (flat) then -85 (blob) -> hit; -80 never visited.
     session, writer = make_find_beam_session(

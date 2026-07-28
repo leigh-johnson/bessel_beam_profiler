@@ -287,15 +287,40 @@ def _set_exposure_us(
 def _clamp(x: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, x))
 
+def robust_max(image: np.ndarray) -> int:
+    """
+    Frame "max" with isolated hot pixels ignored: the k-th brightest
+    pixel, k = 20 ppm of the frame (~62 px on the 3.1 MP BFS sensor;
+    0 = plain max on tiny test frames). Any real beam feature spans
+    thousands of raw pixels, but a hot pixel's dark current scales
+    linearly with exposure and mimics signal at any exposure —
+    hardware lesson 2026-07-28: TWO hot pixels (~150 counts at 387 ms,
+    ~31 at 80 ms) faked find-beam contrast AND calibration convergence
+    for an entire 25-slice scan of a beam that wasn't there.
+    """
+
+    hot_allowance = image.size // 50_000
+    if hot_allowance <= 0:
+        return int(np.max(image))
+
+    flat = image.ravel()
+    kth = flat.size - hot_allowance - 1
+    return int(np.partition(flat, kth)[kth])
+
+
 def image_is_overexposed(image: np.ndarray, config: ExposureCalibrationConfig, strict=False) -> tuple[bool, int, int]:
     """
     Check if the calibration image is saturated due to overexposure.
     strict: If True, raise an OverexposedError if the image is saturated. If False, log a debug message instead.
 
+    The reported max is hot-pixel-robust (see robust_max) so exposure
+    calibration cannot "converge" on a defective pixel; the saturated
+    count stays a raw pixel count.
+
     Raises:
         OverexposedError: If the image is saturated.
     """
-    max_value = int(np.max(image))
+    max_value = robust_max(image)
     saturated_pixels = int(np.sum(image >= config.SaturationThreshold))
 
     if saturated_pixels > config.AllowedSaturatedPixels:
