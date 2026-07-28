@@ -233,3 +233,91 @@ def test_missing_manifest_raises(tmp_path):
 
     with pytest.raises(CompositeError, match="frames.jsonl"):
         composite_slice(empty, GEOMETRY)
+
+
+# ---------------------------------------------------------------------------
+# CLI: run-directory batching via --match-pattern
+# ---------------------------------------------------------------------------
+
+
+def _write_named_slice(run_dir, name):
+    slice_dir = run_dir / name
+    slice_dir.mkdir(parents=True)
+    arr = np.full((12, 16), 20, dtype=np.uint8)
+    np.save(slice_dir / "frame_000.npy", arr)
+    (slice_dir / "frames.jsonl").write_text(
+        json.dumps(
+            {
+                "Path": f"bogus/frame_000.npy",
+                "GantryPosition_mm": {"x_mm": 0.0, "y_mm": 10.0, "z_mm": 0.0},
+                "Extra": {"ScanKind": "AutoBeamStack"},
+            }
+        )
+        + "\n"
+    )
+    return slice_dir
+
+
+def _composite_cli_args(extra):
+    return extra + [
+        "--pixel-size-um", str(PIXEL_UM),
+        "--downsample", "1",
+        "--no-flip-x", "--no-flip-z", "--no-subtract",
+    ]
+
+
+def test_cli_composites_every_matching_slice_in_a_run_dir(tmp_path):
+    from click.testing import CliRunner
+
+    from composite_cli import composite as composite_command
+
+    run_dir = tmp_path / "auto_scan-2026-07-28_15-18-35"
+    for name in ("y0029.60cm", "y0030.10cm"):
+        _write_named_slice(run_dir, name)
+    (run_dir / "not_a_slice").mkdir()  # must be ignored by the pattern
+
+    result = CliRunner().invoke(
+        composite_command, _composite_cli_args([str(run_dir)])
+    )
+
+    assert result.exit_code == 0, result.output
+    assert (run_dir / "y0029.60cm" / "composite.png").exists()
+    assert (run_dir / "y0030.10cm" / "composite.png").exists()
+    assert not (run_dir / "not_a_slice" / "composite.png").exists()
+    assert "2/2 slices composited" in result.output
+
+
+def test_cli_single_slice_dir_still_works(tmp_path):
+    from click.testing import CliRunner
+
+    from composite_cli import composite as composite_command
+
+    slice_dir = _write_named_slice(tmp_path, "y0018.00cm")
+
+    result = CliRunner().invoke(
+        composite_command, _composite_cli_args([str(slice_dir)])
+    )
+
+    assert result.exit_code == 0, result.output
+    assert (slice_dir / "composite.png").exists()
+    assert "Composite array:" in result.output
+
+
+def test_cli_reports_failing_slice_and_continues(tmp_path):
+    from click.testing import CliRunner
+
+    from composite_cli import composite as composite_command
+
+    run_dir = tmp_path / "auto_scan-run"
+    _write_named_slice(run_dir, "y0001.00cm")
+    (run_dir / "y0002.00cm").mkdir()  # matches pattern but has no frames
+
+    result = CliRunner().invoke(
+        composite_command, _composite_cli_args([str(run_dir)])
+    )
+
+    assert result.exit_code != 0
+    assert (run_dir / "y0001.00cm" / "composite.png").exists()
+    assert "FAILED" in result.output
+    assert "1/2 slices composited" in result.output
+    assert "1 slice(s) failed" in result.output
