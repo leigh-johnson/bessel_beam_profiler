@@ -265,6 +265,17 @@ class FluidNCClientConfig:
     StatusPollInterval_s: float = 0.1
     PositionTolerance_mm: float = 0.01
 
+    # Link auto-reconnect (the ESP32 rides the moving gantry on WiFi —
+    # drop-offs are expected). On a timeout or socket error the client
+    # reconnects (up to ReconnectAttempts, ReconnectDelay_s apart) and
+    # retries the operation ONCE. Safe because status queries are
+    # read-only and all motion is absolute G53 (a re-sent move is
+    # idempotent). A controller REBOOT (vs a mere link blip) comes back
+    # in Alarm with position lost — that is detected and reported, and
+    # subsequent motion fails loudly rather than moving blind.
+    ReconnectAttempts: int = 5
+    ReconnectDelay_s: float = 2.0
+
 
 class FluidNCClient:
     """
@@ -288,7 +299,9 @@ class FluidNCClient:
     def connect(self) -> None:
         if not self.transport.is_connected:
             self.transport.connect()
+        self._after_connect()
 
+    def _after_connect(self) -> None:
         banner = self.transport.drain()
         if banner:
             logger.info("FluidNC banner: %s", banner)
@@ -299,7 +312,7 @@ class FluidNCClient:
         # (must_home -> Alarm state) G-code is locked out with error:9;
         # that is fine — home() re-sends the modal line after homing.
         try:
-            self.send_command("G21 G90 G94")
+            self._send_command_once("G21 G90 G94")
         except FluidNCCommandError as ex:
             if "error:9" in str(ex):
                 logger.info(
@@ -308,6 +321,62 @@ class FluidNCClient:
                 )
             else:
                 raise
+
+    def _reconnect(self, reason: str) -> None:
+        """
+        Close and re-establish the link, with retries. Raises
+        FluidNCError when every attempt fails. Afterwards, one status
+        probe distinguishes a WiFi blip (state intact — motion kept
+        executing from the planner buffer) from a controller REBOOT
+        (Alarm, position lost, must re-home).
+        """
+
+        logger.warning(
+            f"FluidNC link lost ({reason}); reconnecting — WiFi "
+            "drop-offs on the moving ESP32 are expected."
+        )
+        self.transport.close()
+
+        attempts = max(1, self.config.ReconnectAttempts)
+        for attempt in range(1, attempts + 1):
+            try:
+                self.transport.connect()
+                self._after_connect()
+                break
+            except (FluidNCCommandError, FluidNCAlarmError):
+                raise  # link is up; a protocol-level problem is real
+            except (FluidNCError, OSError) as ex:
+                logger.warning(
+                    f"Reconnect attempt {attempt}/{attempts} failed: {ex}"
+                )
+                if attempt == attempts:
+                    raise FluidNCError(
+                        f"Could not reconnect to FluidNC at "
+                        f"{self.config.Host}:{self.config.Port} after "
+                        f"{attempts} attempts: {ex}"
+                    ) from ex
+                time.sleep(self.config.ReconnectDelay_s)
+
+        try:
+            status = self._query_status_once(timeout_s=2.0)
+        except (FluidNCError, OSError) as ex:
+            logger.warning(
+                f"Reconnected, but no status report yet ({ex}); "
+                "continuing — the retried operation will surface any "
+                "real problem."
+            )
+            return
+
+        if status.is_alarm:
+            logger.error(
+                "Reconnected but the controller is in ALARM: the ESP32 "
+                "likely REBOOTED (power blip, not just WiFi) and lost "
+                "its position. Motion will be refused until the machine "
+                "is re-homed (python cli.py gantry home) — failing "
+                "loudly instead of moving blind."
+            )
+        else:
+            logger.info(f"FluidNC link restored: {status.Raw}")
 
     def close(self) -> None:
         self.transport.close()
@@ -323,12 +392,29 @@ class FluidNCClient:
 
     def send_command(self, line: str, timeout_s: Optional[float] = None) -> list[str]:
         """
-        Send one G-code / $-command line and block until ok or error:N.
+        Send one G-code / $-command line and block until ok or error:N,
+        reconnecting and re-sending ONCE if the link drops (all motion
+        is absolute G53, so a duplicated command is idempotent).
 
         Returns any informational lines received before the ok (e.g. the
         output of $Report or $$ style queries).
         """
 
+        try:
+            return self._send_command_once(line, timeout_s)
+        except (FluidNCCommandError, FluidNCAlarmError):
+            raise  # the controller answered; the link is fine
+        except (FluidNCError, OSError) as ex:
+            self._reconnect(f"{type(ex).__name__} while sending {line!r}")
+            logger.warning(
+                f"Re-sending {line!r} after reconnect (absolute-mode "
+                "commands are safe to repeat)."
+            )
+            return self._send_command_once(line, timeout_s)
+
+    def _send_command_once(
+        self, line: str, timeout_s: Optional[float] = None
+    ) -> list[str]:
         timeout_s = timeout_s if timeout_s is not None else self.config.CommandTimeout_s
 
         self.transport.write((line.strip() + "\n").encode("utf-8"))
@@ -370,8 +456,19 @@ class FluidNCClient:
     def query_status(self, timeout_s: float = 2.0) -> FluidNCStatus:
         """
         Send the realtime '?' query and return the parsed status report.
+        A live link answers '?' within milliseconds, so a timeout means
+        the link is gone — reconnect and retry once (read-only, safe).
         """
 
+        try:
+            return self._query_status_once(timeout_s)
+        except FluidNCAlarmError:
+            raise  # the controller answered; the link is fine
+        except (FluidNCError, OSError) as ex:
+            self._reconnect(f"{type(ex).__name__} during status query")
+            return self._query_status_once(timeout_s)
+
+    def _query_status_once(self, timeout_s: float = 2.0) -> FluidNCStatus:
         self.transport.write(b"?")
 
         deadline = time.monotonic() + timeout_s
