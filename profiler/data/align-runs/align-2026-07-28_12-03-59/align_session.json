@@ -1,7 +1,7 @@
 {
   "Optic": "axicon1",
   "Notes": [
-    "camera y2=130 at L_12=400mm"
+    "camera y2=130 at L_12=240mm"
   ],
   "Mode": "patrol",
   "MachineY_mm": 90.0,
