@@ -1,0 +1,13 @@
+{
+  "MachineY_mm": 130.0,
+  "BeamY_mm": 900.0,
+  "MeasuredFrom": "axicon3",
+  "CalibrationX_mm": 66.0,
+  "CalibrationZ_mm": -55.05,
+  "FinalExposure_us": 1000000.0,
+  "LastMax": 5,
+  "LastSaturatedPixels": 0,
+  "Iterations": 5,
+  "Converged": false,
+  "Note": "Exposure clamped at camera limit (1e+06 us) before reaching the target window."
+}
