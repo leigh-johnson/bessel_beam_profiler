@@ -418,3 +418,97 @@ def test_controller_wait_raises_on_alarm_without_completing():
         controller.wait_until_motion_complete(point, timeout_s=1.0, signals=signals)
 
     assert not signals.MovementComplete.is_set()
+
+
+# ---------------------------------------------------------------------------
+# Link auto-reconnect (WiFi drop-offs on the moving ESP32)
+# ---------------------------------------------------------------------------
+
+
+class DroppyTransport(FakeTransport):
+    """FakeTransport whose next N writes fail like a dropped WiFi link."""
+
+    def __init__(self, drop_next_writes=0, connects_fail=0):
+        super().__init__()
+        self.drop_next_writes = drop_next_writes
+        self.connects_fail = connects_fail
+        self.connect_count = 0
+
+    def connect(self) -> None:
+        self.connect_count += 1
+        if self.connects_fail > 0:
+            self.connects_fail -= 1
+            raise OSError("no route to host (AP rebooting)")
+        self.closed = False
+
+    def write(self, data: bytes) -> None:
+        if self.drop_next_writes > 0:
+            self.drop_next_writes -= 1
+            raise OSError("broken pipe (wifi drop)")
+        super().write(data)
+
+
+def make_reconnecting_client(transport):
+    client = FluidNCClient(
+        FluidNCClientConfig(
+            CommandTimeout_s=0.5,
+            StatusPollInterval_s=0.0,
+            ReconnectAttempts=3,
+            ReconnectDelay_s=0.0,
+        ),
+        transport=transport,
+    )
+    client.connect()
+    return client
+
+
+def test_query_status_reconnects_after_link_drop():
+    transport = DroppyTransport()
+    client = make_reconnecting_client(transport)
+    connects_before = transport.connect_count
+
+    transport.drop_next_writes = 1  # the '?' write dies mid-air
+
+    status = client.query_status()
+
+    assert status.is_idle
+    assert transport.connect_count == connects_before + 1
+
+
+def test_send_command_resends_after_link_drop():
+    transport = DroppyTransport()
+    client = make_reconnecting_client(transport)
+
+    transport.drop_next_writes = 1
+
+    replies = client.send_command("G53 G1 X10.000 F400.0")
+
+    assert replies == []
+    # The command reached the controller exactly once after the drop.
+    sent_moves = [s for s in transport.sent if s.startswith(b"G53")]
+    assert len(sent_moves) == 1
+
+
+def test_reconnect_gives_up_after_configured_attempts():
+    transport = DroppyTransport()
+    client = make_reconnecting_client(transport)
+
+    # Link dies AND the AP stays down: every reconnect fails.
+    transport.drop_next_writes = 1
+    transport.connects_fail = 99
+
+    with pytest.raises(FluidNCError, match="after 3 attempts"):
+        client.query_status()
+
+
+def test_command_error_does_not_trigger_reconnect():
+    transport = DroppyTransport()
+    client = make_reconnecting_client(transport)
+    connects_before = transport.connect_count
+
+    transport.responses["G1 X9999"] = ["error:2"]
+
+    with pytest.raises(FluidNCCommandError):
+        client.send_command("G1 X9999")
+
+    assert transport.connect_count == connects_before  # link never touched

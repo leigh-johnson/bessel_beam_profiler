@@ -22,14 +22,25 @@ class AxisRange:
     step_mm: float
 
     def values(self) -> list[float]:
+        """
+        Positions from start to stop inclusive. Decreasing ranges
+        (stop < start) walk downward; step_mm's sign is ignored — the
+        direction comes from start/stop. (Descending Y scans let a
+        placement bootstrap near the optic, where a diverging beam is
+        smallest and brightest, then track it outward.)
+        """
+
+        step = abs(self.step_mm)
+        if step <= 0:
+            return [round(self.start_mm, 6)]
+
+        direction = 1.0 if self.stop_mm >= self.start_mm else -1.0
+
         vals = []
         x = self.start_mm
-
-        # Handles increasing ranges.
-        # TODO? Add decreasing later if needed.
-        while x <= self.stop_mm + 1e-9:
+        while direction * (self.stop_mm - x) >= -1e-9:
             vals.append(round(x, 6))
-            x += self.step_mm
+            x += direction * step
 
         return vals
 

@@ -332,6 +332,58 @@ def test_offaxis_background_position_honors_explicit_config(modules, tmp_path):
     assert session.background_xz(limits) == (10.0, -120.0)
 
 
+def test_axis_range_supports_descending(modules):
+    down = modules.coordinates.AxisRange(
+        start_mm=130.0, stop_mm=115.0, step_mm=5.0
+    )
+    assert down.values() == [130.0, 125.0, 120.0, 115.0]
+
+    # The step's sign is ignored; direction comes from start/stop.
+    down_neg = modules.coordinates.AxisRange(
+        start_mm=130.0, stop_mm=115.0, step_mm=-5.0
+    )
+    assert down_neg.values() == down.values()
+
+    up = modules.coordinates.AxisRange(start_mm=10.0, stop_mm=20.0, step_mm=5.0)
+    assert up.values() == [10.0, 15.0, 20.0]
+
+
+def test_descending_y_scan_walks_downward_with_correct_beam_y(
+    modules, tmp_path
+):
+    # --y-start 30 --y-stop 20: bootstrap near the optic (largest machine
+    # Y on this rig), then walk downward. Beam-y bookkeeping is anchored
+    # at Y-START, so folders still name the true distance from the optic.
+    import dataclasses
+
+    session, writer, pauses = make_session(
+        modules, tmp_path, background_mode="none"
+    )
+    config = dataclasses.replace(
+        session.config, YStart_machine_mm=30.0, YStop_machine_mm=20.0
+    )
+    session = modules.auto_scan.AutoScanSession(
+        writer, config, pause_fn=pauses.append
+    )
+    limits = modules.coordinates.Bounds3D(**LIMITS_KW)
+
+    session.run(limits)
+
+    manifest = load_manifest(writer)
+    scans = [r for r in manifest if r["Extra"]["ScanKind"] == "AutoBeamStack"]
+    machine_ys = [r["GantryPosition_mm"]["y_mm"] for r in scans]
+
+    # First slice at Y30 (the start), then Y20 — descending.
+    assert machine_ys[0] == 30.0
+    assert machine_ys[-1] == 20.0
+    assert set(machine_ys) == {30.0, 20.0}
+
+    # MeasuredSensorY=1000 mm at YStart=30, sign +1: beam y 100 cm at
+    # Y30 and 99 cm at Y20.
+    assert (writer.run_dir / "y0100.00cm").is_dir()
+    assert (writer.run_dir / "y0099.00cm").is_dir()
+
+
 def test_offaxis_run_puts_matched_backgrounds_in_each_slice_folder(modules, tmp_path):
     session, writer, pauses = make_session(
         modules, tmp_path, background_mode="offaxis"
@@ -717,6 +769,43 @@ def blob_image():
 
 def flat_image(value):
     return FakeImage(np.full((12, 16), value, dtype=np.uint8))
+
+
+def test_robust_max_ignores_isolated_hot_pixels(modules):
+    # 512x512 = 262k px -> hot allowance 5. Two hot pixels (the real
+    # sensor's defect pattern, 2026-07-28) must not register; a genuine
+    # blob (thousands of px) must.
+    dark = np.zeros((512, 512), dtype=np.uint8)
+    dark[10, 10] = 151
+    dark[400, 300] = 148
+    assert modules.auto_scan.robust_max(dark) == 0
+
+    blob = dark.copy()
+    blob[200:260, 200:260] = 140  # 3600-px real feature
+    assert modules.auto_scan.robust_max(blob) == 140
+
+    # Tiny frames (test fakes): plain max, no allowance.
+    small = np.zeros((12, 16), dtype=np.uint8)
+    small[4, 6] = 150
+    assert modules.auto_scan.robust_max(small) == 150
+
+
+def test_find_beam_rejects_hot_pixels_on_dark_sensor(modules, tmp_path):
+    # Frames dark except 2 hot pixels whose counts scale with exposure —
+    # the exact 2026-07-28 failure. find_beam must give up (return
+    # False), not seed a scan at the first sweep stop.
+    def hot_frame():
+        arr = np.zeros((512, 512), dtype=np.uint8)
+        arr[10, 10] = 151
+        arr[400, 300] = 148
+        return FakeImage(arr)
+
+    # 3 sweep stops x (1 + FindBeamExposureScalings) attempts.
+    session, writer = make_find_beam_session(
+        modules, tmp_path, images=[hot_frame() for _ in range(9)]
+    )
+
+    assert session.find_beam(20.0) is False
 
 
 def test_find_beam_sweeps_far_end_first_and_seeds_at_contrast(modules, tmp_path):
