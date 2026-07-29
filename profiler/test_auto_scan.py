@@ -772,9 +772,8 @@ def flat_image(value):
 
 
 def test_robust_max_ignores_isolated_hot_pixels(modules):
-    # 512x512 = 262k px -> hot allowance 5. Two hot pixels (the real
-    # sensor's defect pattern, 2026-07-28) must not register; a genuine
-    # blob (thousands of px) must.
+    # Two isolated hot pixels (the real sensor's defect pattern,
+    # 2026-07-28) must not register; features with bright neighbors must.
     dark = np.zeros((512, 512), dtype=np.uint8)
     dark[10, 10] = 151
     dark[400, 300] = 148
@@ -784,9 +783,25 @@ def test_robust_max_ignores_isolated_hot_pixels(modules):
     blob[200:260, 200:260] = 140  # 3600-px real feature
     assert modules.auto_scan.robust_max(blob) == 140
 
-    # Tiny frames (test fakes): plain max, no allowance.
+
+def test_robust_max_keeps_tiny_real_core_next_to_hot_pixels(modules):
+    # Regression for the v1 (20 ppm rank) rejection: the ~2 px axicon-1
+    # Bessel core was excluded along with the hot pixels, sending
+    # headless calibration into a dim/saturate limit cycle ("Did not
+    # converge within 60 iterations"). A 2x2 core must be KEPT while the
+    # isolated hot pixels are still rejected.
+    frame = np.zeros((512, 512), dtype=np.uint8)
+    frame[10, 10] = 151            # hot pixel
+    frame[400, 300] = 148          # hot pixel
+    frame[256, 256] = 230          # real core, 2x2 with a falloff
+    frame[256, 257] = 180
+    frame[257, 256] = 175
+    frame[257, 257] = 140
+    assert modules.auto_scan.robust_max(frame) == 230
+
+    # Blob test-fake frames still read their peak.
     small = np.zeros((12, 16), dtype=np.uint8)
-    small[4, 6] = 150
+    small[4:8, 6:10] = 150
     assert modules.auto_scan.robust_max(small) == 150
 
 
