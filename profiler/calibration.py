@@ -289,23 +289,43 @@ def _clamp(x: float, lo: float, hi: float) -> float:
 
 def robust_max(image: np.ndarray) -> int:
     """
-    Frame "max" with isolated hot pixels ignored: the k-th brightest
-    pixel, k = 20 ppm of the frame (~62 px on the 3.1 MP BFS sensor;
-    0 = plain max on tiny test frames). Any real beam feature spans
-    thousands of raw pixels, but a hot pixel's dark current scales
-    linearly with exposure and mimics signal at any exposure —
-    hardware lesson 2026-07-28: TWO hot pixels (~150 counts at 387 ms,
-    ~31 at 80 ms) faked find-beam contrast AND calibration convergence
-    for an entire 25-slice scan of a beam that wasn't there.
+    Frame "max" with isolated hot pixels ignored: the brightest pixel
+    that has at least one 8-neighbor >= half its own value.
+
+    A hot pixel sits alone on dark neighbors (its dark current scales
+    linearly with exposure and mimics signal at any exposure — the two
+    ~150-count-at-387-ms pixels faked find-beam contrast AND calibration
+    convergence on 2026-07-28). Any REAL optical feature — even the
+    ~2 px axicon-1 Bessel core — carries bright neighbors and is kept.
+
+    v2 (2026-07-28 evening): v1 ignored the k brightest pixels (20 ppm),
+    which also excluded the real ~2 px core; headless calibration then
+    read the halo as "too dim", raised exposure until the core
+    saturated, halved, and limit-cycled — the "Did not converge within
+    60 iterations" warnings, and the root cause of the saturated
+    10.2–16.2 cm slices in the jul28 axicon-1 scans.
     """
 
-    hot_allowance = image.size // 50_000
-    if hot_allowance <= 0:
-        return int(np.max(image))
+    if image.size == 0:
+        return 0
 
-    flat = image.ravel()
-    kth = flat.size - hot_allowance - 1
-    return int(np.partition(flat, kth)[kth])
+    padded = np.pad(image, 1, mode="constant")
+    rows, cols = image.shape
+    neighbor_max = np.zeros(image.shape, dtype=image.dtype)
+    for dr in range(3):
+        for dc in range(3):
+            if dr == 1 and dc == 1:
+                continue
+            np.maximum(
+                neighbor_max,
+                padded[dr:dr + rows, dc:dc + cols],
+                out=neighbor_max,
+            )
+
+    supported = neighbor_max.astype(np.float32) >= 0.5 * image.astype(np.float32)
+    if not supported.any():
+        return int(image.max())
+    return int(image[supported].max())
 
 
 def image_is_overexposed(image: np.ndarray, config: ExposureCalibrationConfig, strict=False) -> tuple[bool, int, int]:
