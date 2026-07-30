@@ -512,3 +512,135 @@ def test_command_error_does_not_trigger_reconnect():
         client.send_command("G1 X9999")
 
     assert transport.connect_count == connects_before  # link never touched
+
+
+class MuteStatusTransport(FakeTransport):
+    """
+    FakeTransport where the link LOOKS up (writes succeed, reconnects
+    succeed) but '?' goes unanswered for the next N queries — the
+    flapping-WiFi shape that a plain drop-and-reconnect retry misses.
+    """
+
+    def __init__(self, mute_next_queries=0):
+        super().__init__()
+        self.mute_next_queries = mute_next_queries
+        self.connect_count = 0
+
+    def connect(self) -> None:
+        self.connect_count += 1
+        self.closed = False
+
+    def write(self, data: bytes) -> None:
+        if data == b"?" and self.mute_next_queries > 0:
+            self.mute_next_queries -= 1
+            return  # swallowed by the ether; no reply will come
+        super().write(data)
+
+
+def make_muting_client(transport, link_retry_attempts=3):
+    client = FluidNCClient(
+        FluidNCClientConfig(
+            CommandTimeout_s=0.5,
+            StatusPollInterval_s=0.0,
+            StatusTimeout_s=0.05,
+            ReconnectAttempts=2,
+            ReconnectDelay_s=0.0,
+            LinkRetryAttempts=link_retry_attempts,
+        ),
+        transport=transport,
+    )
+    client.connect()
+    return client
+
+
+def test_query_status_survives_consecutive_drops():
+    # Two '?' writes in a row die: retry-once would give up here.
+    transport = DroppyTransport()
+    client = make_reconnecting_client(transport)
+    connects_before = transport.connect_count
+
+    transport.drop_next_writes = 2
+
+    status = client.query_status()
+
+    assert status.is_idle
+    assert transport.connect_count == connects_before + 2
+
+
+def test_query_status_survives_unanswered_queries_on_healthy_socket():
+    # The socket stays "up" but '?' answers are lost (timeout, not OSError).
+    # Budget: try 1 + reconnect probe + try 2 = 3 mutes, then answers flow.
+    transport = MuteStatusTransport(mute_next_queries=3)
+    client = make_muting_client(transport)
+
+    status = client.query_status()
+
+    assert status.is_idle
+    assert transport.mute_next_queries == 0
+
+
+def test_query_status_gives_up_after_link_retry_attempts():
+    transport = MuteStatusTransport(mute_next_queries=99)
+    client = make_muting_client(transport, link_retry_attempts=3)
+
+    with pytest.raises(FluidNCError, match="failed 3 times"):
+        client.query_status()
+
+
+def test_send_command_survives_consecutive_drops():
+    transport = DroppyTransport()
+    client = make_reconnecting_client(transport)
+
+    transport.drop_next_writes = 2
+
+    replies = client.send_command("G53 G1 X10.000 F400.0")
+
+    assert replies == []
+    sent_moves = [s for s in transport.sent if s.startswith(b"G53")]
+    assert len(sent_moves) == 1  # reached the controller exactly once
+
+
+def test_wait_until_idle_survives_status_blackout_mid_move():
+    # Every '?' is lost for longer than a full query_status retry budget
+    # (3 tries + reconnect probes), then the link comes back and the
+    # machine reports Idle at target. The motion deadline must be the
+    # only arbiter — the wait survives the blackout.
+    transport = MuteStatusTransport(mute_next_queries=7)
+    client = make_muting_client(transport)
+    transport.status_reports.append("<Idle|MPos:5.000,6.000,-7.000|FS:0,0>")
+
+    status = client.wait_until_idle(
+        timeout_s=5.0, target=Vec3D(x_mm=5.0, y_mm=6.0, z_mm=-7.0)
+    )
+
+    assert status.MPos == Vec3D(x_mm=5.0, y_mm=6.0, z_mm=-7.0)
+
+
+def test_wait_until_idle_raises_at_deadline_when_link_stays_dead():
+    transport = MuteStatusTransport(mute_next_queries=10_000)
+    client = make_muting_client(transport)
+
+    with pytest.raises(FluidNCTimeoutError, match="link was down") as excinfo:
+        client.wait_until_idle(timeout_s=0.3)
+
+    assert excinfo.value.__cause__ is not None
+
+
+class AlarmAfterBlackoutTransport(MuteStatusTransport):
+    """After the blackout, every '?' answers Alarm — real hardware stays in
+    Alarm until it is dealt with; a queue of one report would be eaten by
+    the reconnect probe and understate the failure."""
+
+    def write(self, data: bytes) -> None:
+        if data == b"?" and self.mute_next_queries == 0 and not self.status_reports:
+            self.status_reports.append("<Alarm|MPos:0.000,0.000,0.000>")
+        super().write(data)
+
+
+def test_wait_until_idle_still_raises_immediately_on_alarm_after_blackout():
+    # A blackout must not blunt alarm handling once the link returns.
+    transport = AlarmAfterBlackoutTransport(mute_next_queries=3)
+    client = make_muting_client(transport)
+
+    with pytest.raises(FluidNCAlarmError):
+        client.wait_until_idle(timeout_s=5.0)

@@ -11,12 +11,12 @@ from log_utils import add_file_log
 # Default optic configuration for the Bessel-beam line, prompted for at the
 # start of every manual XY sweep.
 DEFAULT_OPTIC_CONFIG = {
-    "GaussianBeamWaist_mm": 4.59, # see beam_gaussian_fit_analysis_$DATE.pynb
+    "GaussianBeamWaist_mm": 9.50, # see beam_gaussian_fit_analysis_$DATE.pynb
     "Axicon1_deg": 5.0,
     "Axicon2_deg": 5.0,
     "Axicon3_deg": 0.5,
-    "L12_mm": 190.0,
-    "L23_mm": 50.0,
+    "L12_mm": 240.0,
+    "L23_mm": 220.0,
 }
 
 def _parse_metadata(metadata_items: tuple[str, ...]) -> dict[str, str]:

@@ -1,0 +1,14 @@
+{
+  "Reused": false,
+  "SliceExposure_us": 353.44135993082995,
+  "BackgroundExposure_us": 353.44135993082995,
+  "BackgroundSlice": "y0192.00cm",
+  "BackgroundMachineY_mm": 10.0,
+  "ExposureChangeFraction": 0.1777173913043479,
+  "MaxExposureChangeFraction": 0.1,
+  "BackgroundPaths": [
+    "data/auto_scan-2026-07-29_16-25-57/y0192.00cm/jul29_axicon3_010-background-tableyp001920.000mm-gantryxp000004.000mm-yp000010.000mm-zm000112.100mm-shot0000.npy",
+    "data/auto_scan-2026-07-29_16-25-57/y0192.00cm/jul29_axicon3_010-background-tableyp001920.000mm-gantryxp000004.000mm-yp000010.000mm-zm000112.100mm-shot0001.npy",
+    "data/auto_scan-2026-07-29_16-25-57/y0192.00cm/jul29_axicon3_010-background-tableyp001920.000mm-gantryxp000004.000mm-yp000010.000mm-zm000112.100mm-shot0002.npy"
+  ]
+}

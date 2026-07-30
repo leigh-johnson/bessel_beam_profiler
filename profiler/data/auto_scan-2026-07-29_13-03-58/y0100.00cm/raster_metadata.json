@@ -1,0 +1,624 @@
+{
+  "MachineY_mm": 130.0,
+  "BeamY_mm": 1000.0,
+  "RasterMode": "adaptive",
+  "Center_mm": [
+    66.0,
+    -55.05
+  ],
+  "Step_mm": [
+    5.0,
+    4.0
+  ],
+  "Cap_mm": {
+    "XMin": 4.0,
+    "XMax": 107.0,
+    "YMin": -112.1,
+    "YMax": 2.0
+  },
+  "SignalThreshold_counts": 8.0,
+  "MinSignalPixels": 50,
+  "BorderStripFraction": 0.15,
+  "BorderTest": "any",
+  "Iterations": [
+    {
+      "Pass": 1,
+      "BlindProbe": true,
+      "Grew": [
+        "+x",
+        "-x",
+        "+y",
+        "-y"
+      ],
+      "Stopped": {},
+      "CellsAdded": [
+        [
+          1,
+          0,
+          71.0,
+          -55.05
+        ],
+        [
+          -1,
+          0,
+          61.0,
+          -55.05
+        ],
+        [
+          -1,
+          1,
+          61.0,
+          -51.05
+        ],
+        [
+          0,
+          1,
+          66.0,
+          -51.05
+        ],
+        [
+          1,
+          1,
+          71.0,
+          -51.05
+        ],
+        [
+          -1,
+          -1,
+          61.0,
+          -59.05
+        ],
+        [
+          0,
+          -1,
+          66.0,
+          -59.05
+        ],
+        [
+          1,
+          -1,
+          71.0,
+          -59.05
+        ]
+      ]
+    },
+    {
+      "Pass": 2,
+      "BlindProbe": true,
+      "Grew": [
+        "+x",
+        "-x",
+        "+y",
+        "-y"
+      ],
+      "Stopped": {},
+      "CellsAdded": [
+        [
+          2,
+          -1,
+          76.0,
+          -59.05
+        ],
+        [
+          2,
+          0,
+          76.0,
+          -55.05
+        ],
+        [
+          2,
+          1,
+          76.0,
+          -51.05
+        ],
+        [
+          -2,
+          -1,
+          56.0,
+          -59.05
+        ],
+        [
+          -2,
+          0,
+          56.0,
+          -55.05
+        ],
+        [
+          -2,
+          1,
+          56.0,
+          -51.05
+        ],
+        [
+          -2,
+          2,
+          56.0,
+          -47.05
+        ],
+        [
+          -1,
+          2,
+          61.0,
+          -47.05
+        ],
+        [
+          0,
+          2,
+          66.0,
+          -47.05
+        ],
+        [
+          1,
+          2,
+          71.0,
+          -47.05
+        ],
+        [
+          2,
+          2,
+          76.0,
+          -47.05
+        ],
+        [
+          -2,
+          -2,
+          56.0,
+          -63.05
+        ],
+        [
+          -1,
+          -2,
+          61.0,
+          -63.05
+        ],
+        [
+          0,
+          -2,
+          66.0,
+          -63.05
+        ],
+        [
+          1,
+          -2,
+          71.0,
+          -63.05
+        ],
+        [
+          2,
+          -2,
+          76.0,
+          -63.05
+        ]
+      ]
+    }
+  ],
+  "EdgeStops": {
+    "+x": "dark",
+    "-x": "dark",
+    "+y": "dark",
+    "-y": "dark"
+  },
+  "TruncatedSides": [],
+  "GridShape": [
+    5,
+    5
+  ],
+  "FinalRect_mm": {
+    "XMin": 56.0,
+    "XMax": 76.0,
+    "YMin": -63.05,
+    "YMax": -47.05
+  },
+  "CellsCaptured": 25,
+  "FixedGridCells": 609,
+  "BeamFitsInSingleFrame": false,
+  "BeamFound": false,
+  "BlindProbePassesUsed": 2,
+  "Cells": [
+    {
+      "I": 0,
+      "J": 0,
+      "X_mm": 66.0,
+      "Y_mm": -55.05,
+      "AnySignal": false,
+      "BorderSignal": {
+        "+x": false,
+        "-x": false,
+        "+y": false,
+        "-y": false
+      },
+      "Paths": [
+        "data/auto_scan-2026-07-29_13-03-58/y0100.00cm/jul28_axicon3_002-tableyp001000.000mm-gantryxp000066.000mm-yp000130.000mm-zm000055.050mm-shot0000-dark.npy"
+      ]
+    },
+    {
+      "I": 1,
+      "J": 0,
+      "X_mm": 71.0,
+      "Y_mm": -55.05,
+      "AnySignal": false,
+      "BorderSignal": {
+        "+x": false,
+        "-x": false,
+        "+y": false,
+        "-y": false
+      },
+      "Paths": [
+        "data/auto_scan-2026-07-29_13-03-58/y0100.00cm/jul28_axicon3_002-tableyp001000.000mm-gantryxp000071.000mm-yp000130.000mm-zm000055.050mm-shot0000-dark.npy"
+      ]
+    },
+    {
+      "I": -1,
+      "J": 0,
+      "X_mm": 61.0,
+      "Y_mm": -55.05,
+      "AnySignal": false,
+      "BorderSignal": {
+        "+x": false,
+        "-x": false,
+        "+y": false,
+        "-y": false
+      },
+      "Paths": [
+        "data/auto_scan-2026-07-29_13-03-58/y0100.00cm/jul28_axicon3_002-tableyp001000.000mm-gantryxp000061.000mm-yp000130.000mm-zm000055.050mm-shot0000-dark.npy"
+      ]
+    },
+    {
+      "I": -1,
+      "J": 1,
+      "X_mm": 61.0,
+      "Y_mm": -51.05,
+      "AnySignal": false,
+      "BorderSignal": {
+        "+x": false,
+        "-x": false,
+        "+y": false,
+        "-y": false
+      },
+      "Paths": [
+        "data/auto_scan-2026-07-29_13-03-58/y0100.00cm/jul28_axicon3_002-tableyp001000.000mm-gantryxp000061.000mm-yp000130.000mm-zm000051.050mm-shot0000-dark.npy"
+      ]
+    },
+    {
+      "I": 0,
+      "J": 1,
+      "X_mm": 66.0,
+      "Y_mm": -51.05,
+      "AnySignal": false,
+      "BorderSignal": {
+        "+x": false,
+        "-x": false,
+        "+y": false,
+        "-y": false
+      },
+      "Paths": [
+        "data/auto_scan-2026-07-29_13-03-58/y0100.00cm/jul28_axicon3_002-tableyp001000.000mm-gantryxp000066.000mm-yp000130.000mm-zm000051.050mm-shot0000-dark.npy"
+      ]
+    },
+    {
+      "I": 1,
+      "J": 1,
+      "X_mm": 71.0,
+      "Y_mm": -51.05,
+      "AnySignal": false,
+      "BorderSignal": {
+        "+x": false,
+        "-x": false,
+        "+y": false,
+        "-y": false
+      },
+      "Paths": [
+        "data/auto_scan-2026-07-29_13-03-58/y0100.00cm/jul28_axicon3_002-tableyp001000.000mm-gantryxp000071.000mm-yp000130.000mm-zm000051.050mm-shot0000-dark.npy"
+      ]
+    },
+    {
+      "I": -1,
+      "J": -1,
+      "X_mm": 61.0,
+      "Y_mm": -59.05,
+      "AnySignal": false,
+      "BorderSignal": {
+        "+x": false,
+        "-x": false,
+        "+y": false,
+        "-y": false
+      },
+      "Paths": [
+        "data/auto_scan-2026-07-29_13-03-58/y0100.00cm/jul28_axicon3_002-tableyp001000.000mm-gantryxp000061.000mm-yp000130.000mm-zm000059.050mm-shot0000-dark.npy"
+      ]
+    },
+    {
+      "I": 0,
+      "J": -1,
+      "X_mm": 66.0,
+      "Y_mm": -59.05,
+      "AnySignal": false,
+      "BorderSignal": {
+        "+x": false,
+        "-x": false,
+        "+y": false,
+        "-y": false
+      },
+      "Paths": [
+        "data/auto_scan-2026-07-29_13-03-58/y0100.00cm/jul28_axicon3_002-tableyp001000.000mm-gantryxp000066.000mm-yp000130.000mm-zm000059.050mm-shot0000-dark.npy"
+      ]
+    },
+    {
+      "I": 1,
+      "J": -1,
+      "X_mm": 71.0,
+      "Y_mm": -59.05,
+      "AnySignal": false,
+      "BorderSignal": {
+        "+x": false,
+        "-x": false,
+        "+y": false,
+        "-y": false
+      },
+      "Paths": [
+        "data/auto_scan-2026-07-29_13-03-58/y0100.00cm/jul28_axicon3_002-tableyp001000.000mm-gantryxp000071.000mm-yp000130.000mm-zm000059.050mm-shot0000-dark.npy"
+      ]
+    },
+    {
+      "I": 2,
+      "J": -1,
+      "X_mm": 76.0,
+      "Y_mm": -59.05,
+      "AnySignal": false,
+      "BorderSignal": {
+        "+x": false,
+        "-x": false,
+        "+y": false,
+        "-y": false
+      },
+      "Paths": [
+        "data/auto_scan-2026-07-29_13-03-58/y0100.00cm/jul28_axicon3_002-tableyp001000.000mm-gantryxp000076.000mm-yp000130.000mm-zm000059.050mm-shot0000-dark.npy"
+      ]
+    },
+    {
+      "I": 2,
+      "J": 0,
+      "X_mm": 76.0,
+      "Y_mm": -55.05,
+      "AnySignal": false,
+      "BorderSignal": {
+        "+x": false,
+        "-x": false,
+        "+y": false,
+        "-y": false
+      },
+      "Paths": [
+        "data/auto_scan-2026-07-29_13-03-58/y0100.00cm/jul28_axicon3_002-tableyp001000.000mm-gantryxp000076.000mm-yp000130.000mm-zm000055.050mm-shot0000-dark.npy"
+      ]
+    },
+    {
+      "I": 2,
+      "J": 1,
+      "X_mm": 76.0,
+      "Y_mm": -51.05,
+      "AnySignal": false,
+      "BorderSignal": {
+        "+x": false,
+        "-x": false,
+        "+y": false,
+        "-y": false
+      },
+      "Paths": [
+        "data/auto_scan-2026-07-29_13-03-58/y0100.00cm/jul28_axicon3_002-tableyp001000.000mm-gantryxp000076.000mm-yp000130.000mm-zm000051.050mm-shot0000-dark.npy"
+      ]
+    },
+    {
+      "I": -2,
+      "J": -1,
+      "X_mm": 56.0,
+      "Y_mm": -59.05,
+      "AnySignal": false,
+      "BorderSignal": {
+        "+x": false,
+        "-x": false,
+        "+y": false,
+        "-y": false
+      },
+      "Paths": [
+        "data/auto_scan-2026-07-29_13-03-58/y0100.00cm/jul28_axicon3_002-tableyp001000.000mm-gantryxp000056.000mm-yp000130.000mm-zm000059.050mm-shot0000-dark.npy"
+      ]
+    },
+    {
+      "I": -2,
+      "J": 0,
+      "X_mm": 56.0,
+      "Y_mm": -55.05,
+      "AnySignal": false,
+      "BorderSignal": {
+        "+x": false,
+        "-x": false,
+        "+y": false,
+        "-y": false
+      },
+      "Paths": [
+        "data/auto_scan-2026-07-29_13-03-58/y0100.00cm/jul28_axicon3_002-tableyp001000.000mm-gantryxp000056.000mm-yp000130.000mm-zm000055.050mm-shot0000-dark.npy"
+      ]
+    },
+    {
+      "I": -2,
+      "J": 1,
+      "X_mm": 56.0,
+      "Y_mm": -51.05,
+      "AnySignal": false,
+      "BorderSignal": {
+        "+x": false,
+        "-x": false,
+        "+y": false,
+        "-y": false
+      },
+      "Paths": [
+        "data/auto_scan-2026-07-29_13-03-58/y0100.00cm/jul28_axicon3_002-tableyp001000.000mm-gantryxp000056.000mm-yp000130.000mm-zm000051.050mm-shot0000-dark.npy"
+      ]
+    },
+    {
+      "I": -2,
+      "J": 2,
+      "X_mm": 56.0,
+      "Y_mm": -47.05,
+      "AnySignal": false,
+      "BorderSignal": {
+        "+x": false,
+        "-x": false,
+        "+y": false,
+        "-y": false
+      },
+      "Paths": [
+        "data/auto_scan-2026-07-29_13-03-58/y0100.00cm/jul28_axicon3_002-tableyp001000.000mm-gantryxp000056.000mm-yp000130.000mm-zm000047.050mm-shot0000-dark.npy"
+      ]
+    },
+    {
+      "I": -1,
+      "J": 2,
+      "X_mm": 61.0,
+      "Y_mm": -47.05,
+      "AnySignal": false,
+      "BorderSignal": {
+        "+x": false,
+        "-x": false,
+        "+y": false,
+        "-y": false
+      },
+      "Paths": [
+        "data/auto_scan-2026-07-29_13-03-58/y0100.00cm/jul28_axicon3_002-tableyp001000.000mm-gantryxp000061.000mm-yp000130.000mm-zm000047.050mm-shot0000-dark.npy"
+      ]
+    },
+    {
+      "I": 0,
+      "J": 2,
+      "X_mm": 66.0,
+      "Y_mm": -47.05,
+      "AnySignal": false,
+      "BorderSignal": {
+        "+x": false,
+        "-x": false,
+        "+y": false,
+        "-y": false
+      },
+      "Paths": [
+        "data/auto_scan-2026-07-29_13-03-58/y0100.00cm/jul28_axicon3_002-tableyp001000.000mm-gantryxp000066.000mm-yp000130.000mm-zm000047.050mm-shot0000-dark.npy"
+      ]
+    },
+    {
+      "I": 1,
+      "J": 2,
+      "X_mm": 71.0,
+      "Y_mm": -47.05,
+      "AnySignal": false,
+      "BorderSignal": {
+        "+x": false,
+        "-x": false,
+        "+y": false,
+        "-y": false
+      },
+      "Paths": [
+        "data/auto_scan-2026-07-29_13-03-58/y0100.00cm/jul28_axicon3_002-tableyp001000.000mm-gantryxp000071.000mm-yp000130.000mm-zm000047.050mm-shot0000-dark.npy"
+      ]
+    },
+    {
+      "I": 2,
+      "J": 2,
+      "X_mm": 76.0,
+      "Y_mm": -47.05,
+      "AnySignal": false,
+      "BorderSignal": {
+        "+x": false,
+        "-x": false,
+        "+y": false,
+        "-y": false
+      },
+      "Paths": [
+        "data/auto_scan-2026-07-29_13-03-58/y0100.00cm/jul28_axicon3_002-tableyp001000.000mm-gantryxp000076.000mm-yp000130.000mm-zm000047.050mm-shot0000-dark.npy"
+      ]
+    },
+    {
+      "I": -2,
+      "J": -2,
+      "X_mm": 56.0,
+      "Y_mm": -63.05,
+      "AnySignal": false,
+      "BorderSignal": {
+        "+x": false,
+        "-x": false,
+        "+y": false,
+        "-y": false
+      },
+      "Paths": [
+        "data/auto_scan-2026-07-29_13-03-58/y0100.00cm/jul28_axicon3_002-tableyp001000.000mm-gantryxp000056.000mm-yp000130.000mm-zm000063.050mm-shot0000-dark.npy"
+      ]
+    },
+    {
+      "I": -1,
+      "J": -2,
+      "X_mm": 61.0,
+      "Y_mm": -63.05,
+      "AnySignal": false,
+      "BorderSignal": {
+        "+x": false,
+        "-x": false,
+        "+y": false,
+        "-y": false
+      },
+      "Paths": [
+        "data/auto_scan-2026-07-29_13-03-58/y0100.00cm/jul28_axicon3_002-tableyp001000.000mm-gantryxp000061.000mm-yp000130.000mm-zm000063.050mm-shot0000-dark.npy"
+      ]
+    },
+    {
+      "I": 0,
+      "J": -2,
+      "X_mm": 66.0,
+      "Y_mm": -63.05,
+      "AnySignal": false,
+      "BorderSignal": {
+        "+x": false,
+        "-x": false,
+        "+y": false,
+        "-y": false
+      },
+      "Paths": [
+        "data/auto_scan-2026-07-29_13-03-58/y0100.00cm/jul28_axicon3_002-tableyp001000.000mm-gantryxp000066.000mm-yp000130.000mm-zm000063.050mm-shot0000-dark.npy"
+      ]
+    },
+    {
+      "I": 1,
+      "J": -2,
+      "X_mm": 71.0,
+      "Y_mm": -63.05,
+      "AnySignal": false,
+      "BorderSignal": {
+        "+x": false,
+        "-x": false,
+        "+y": false,
+        "-y": false
+      },
+      "Paths": [
+        "data/auto_scan-2026-07-29_13-03-58/y0100.00cm/jul28_axicon3_002-tableyp001000.000mm-gantryxp000071.000mm-yp000130.000mm-zm000063.050mm-shot0000-dark.npy"
+      ]
+    },
+    {
+      "I": 2,
+      "J": -2,
+      "X_mm": 76.0,
+      "Y_mm": -63.05,
+      "AnySignal": false,
+      "BorderSignal": {
+        "+x": false,
+        "-x": false,
+        "+y": false,
+        "-y": false
+      },
+      "Paths": [
+        "data/auto_scan-2026-07-29_13-03-58/y0100.00cm/jul28_axicon3_002-tableyp001000.000mm-gantryxp000076.000mm-yp000130.000mm-zm000063.050mm-shot0000-dark.npy"
+      ]
+    }
+  ],
+  "SignalThresholdSource": "offaxis-background-p99(0.00)+margin(8)",
+  "LatticeAxes": {
+    "x": "machine X",
+    "y": "machine Z"
+  }
+}

@@ -1,0 +1,82 @@
+{
+  "MachineY_mm": 30.0,
+  "BeamY_mm": 1800.0,
+  "RasterMode": "adaptive",
+  "Center_mm": [
+    85.0,
+    -83.1
+  ],
+  "Step_mm": [
+    5.0,
+    4.0
+  ],
+  "Cap_mm": {
+    "XMin": 4.0,
+    "XMax": 107.0,
+    "YMin": -112.1,
+    "YMax": 2.0
+  },
+  "SignalThreshold_counts": 8.0,
+  "MinSignalPixels": 50,
+  "BorderStripFraction": 0.15,
+  "BorderTest": "any",
+  "Iterations": [
+    {
+      "Pass": 1,
+      "BlindProbe": false,
+      "Grew": [],
+      "Stopped": {
+        "+x": "dark",
+        "-x": "dark",
+        "+y": "dark",
+        "-y": "dark"
+      },
+      "CellsAdded": []
+    }
+  ],
+  "EdgeStops": {
+    "+x": "dark",
+    "-x": "dark",
+    "+y": "dark",
+    "-y": "dark"
+  },
+  "TruncatedSides": [],
+  "GridShape": [
+    1,
+    1
+  ],
+  "FinalRect_mm": {
+    "XMin": 85.0,
+    "XMax": 85.0,
+    "YMin": -83.1,
+    "YMax": -83.1
+  },
+  "CellsCaptured": 1,
+  "FixedGridCells": 609,
+  "BeamFitsInSingleFrame": true,
+  "BeamFound": true,
+  "BlindProbePassesUsed": 0,
+  "Cells": [
+    {
+      "I": 0,
+      "J": 0,
+      "X_mm": 85.0,
+      "Y_mm": -83.1,
+      "AnySignal": true,
+      "BorderSignal": {
+        "+x": false,
+        "-x": false,
+        "+y": false,
+        "-y": false
+      },
+      "Paths": [
+        "data/auto_scan-2026-07-29_15-56-42/y0180.00cm/jul29_axicon3_009-tableyp001800.000mm-gantryxp000085.000mm-yp000030.000mm-zm000083.100mm-shot0000.npy"
+      ]
+    }
+  ],
+  "SignalThresholdSource": "offaxis-background-p99(0.00)+margin(8)",
+  "LatticeAxes": {
+    "x": "machine X",
+    "y": "machine Z"
+  }
+}

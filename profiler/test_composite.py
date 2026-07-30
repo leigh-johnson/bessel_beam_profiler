@@ -321,3 +321,146 @@ def test_cli_reports_failing_slice_and_continues(tmp_path):
     assert "FAILED" in result.output
     assert "1/2 slices composited" in result.output
     assert "1 slice(s) failed" in result.output
+
+
+# ---------------------------------------------------------------------------
+# CLI: multiple run dirs, glob patterns, --commit
+# ---------------------------------------------------------------------------
+
+
+def _invoke_composite(args):
+    from click.testing import CliRunner
+
+    from composite_cli import composite as composite_command
+
+    return CliRunner().invoke(composite_command, _composite_cli_args(args))
+
+
+def _git(cwd, *args):
+    import subprocess
+
+    return subprocess.run(
+        ["git", *args], cwd=cwd, check=True, capture_output=True, text=True
+    )
+
+
+def _init_git_repo(path):
+    _git(path, "init", "--initial-branch=main")
+    _git(path, "config", "user.email", "test@example.com")
+    _git(path, "config", "user.name", "Test")
+
+
+def test_cli_composites_multiple_run_dirs(tmp_path):
+    run_a = tmp_path / "auto_scan-2026-07-29_13-36-52"
+    run_b = tmp_path / "auto_scan-2026-07-29_14-01-15"
+    _write_named_slice(run_a, "y0001.00cm")
+    _write_named_slice(run_b, "y0002.00cm")
+
+    result = _invoke_composite([str(run_a), str(run_b)])
+
+    assert result.exit_code == 0, result.output
+    assert (run_a / "y0001.00cm" / "composite.png").exists()
+    assert (run_b / "y0002.00cm" / "composite.png").exists()
+    assert f"=== {run_a} ===" in result.output
+    assert f"=== {run_b} ===" in result.output
+
+
+def test_cli_quoted_glob_pattern_expands_to_run_dirs(tmp_path):
+    # A pattern the shell did NOT expand (quoted) must be globbed by the
+    # CLI itself, sorted, and each match composited.
+    run_a = tmp_path / "auto_scan-2026-07-29_13-36-52"
+    run_b = tmp_path / "auto_scan-2026-07-29_14-01-15"
+    _write_named_slice(run_a, "y0001.00cm")
+    _write_named_slice(run_b, "y0002.00cm")
+    (tmp_path / "auto_scan-notes.txt").write_text("not a dir")
+
+    result = _invoke_composite([str(tmp_path / "auto_scan-2026-07-29_*")])
+
+    assert result.exit_code == 0, result.output
+    assert (run_a / "y0001.00cm" / "composite.png").exists()
+    assert (run_b / "y0002.00cm" / "composite.png").exists()
+    # Sorted expansion: earlier timestamp reported first.
+    assert result.output.index(run_a.name) < result.output.index(run_b.name)
+
+
+def test_cli_pattern_matching_nothing_is_a_usage_error(tmp_path):
+    result = _invoke_composite([str(tmp_path / "auto_scan-1999-*")])
+
+    assert result.exit_code != 0
+    assert "matches no directories" in result.output
+
+
+def test_cli_commit_makes_one_commit_per_run_dir(tmp_path, monkeypatch):
+    _init_git_repo(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    for run, slc in (
+        ("auto_scan-2026-07-29_13-36-52", "y0001.00cm"),
+        ("auto_scan-2026-07-29_14-01-15", "y0002.00cm"),
+    ):
+        _write_named_slice(tmp_path / run, slc)
+
+    result = _invoke_composite(["auto_scan-2026-07-29_*", "--commit"])
+
+    assert result.exit_code == 0, result.output
+    subjects = _git(
+        tmp_path, "log", "--format=%s"
+    ).stdout.strip().splitlines()
+    # One commit per run, committed in expansion (timestamp) order.
+    assert subjects == [
+        "composite: auto_scan-2026-07-29_14-01-15/",
+        "composite: auto_scan-2026-07-29_13-36-52/",
+    ]
+
+    # Each commit contains only its own run directory.
+    files = _git(
+        tmp_path, "show", "--name-only", "--format=", "HEAD"
+    ).stdout
+    assert "auto_scan-2026-07-29_14-01-15/" in files
+    assert "auto_scan-2026-07-29_13-36-52/" not in files
+
+    # Re-running is a no-op: nothing new, no third commit, exit 0.
+    rerun = _invoke_composite(["auto_scan-2026-07-29_*", "--commit"])
+    assert rerun.exit_code == 0, rerun.output
+    assert "nothing new to commit" in rerun.output
+    assert (
+        len(_git(tmp_path, "log", "--format=%s").stdout.strip().splitlines())
+        == 2
+    )
+
+
+def test_cli_commit_leaves_unrelated_staged_work_alone(tmp_path, monkeypatch):
+    _init_git_repo(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    _write_named_slice(tmp_path / "auto_scan-run", "y0001.00cm")
+    (tmp_path / "notes.md").write_text("work in progress")
+    _git(tmp_path, "add", "notes.md")
+
+    result = _invoke_composite(["auto_scan-run", "--commit"])
+
+    assert result.exit_code == 0, result.output
+    committed = _git(
+        tmp_path, "show", "--name-only", "--format=", "HEAD"
+    ).stdout
+    assert "notes.md" not in committed
+    # notes.md is still staged, untouched.
+    assert "notes.md" in _git(tmp_path, "diff", "--cached", "--name-only").stdout
+
+
+def test_cli_commit_skipped_when_a_slice_fails(tmp_path, monkeypatch):
+    import subprocess
+
+    _init_git_repo(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    run_dir = tmp_path / "auto_scan-run"
+    _write_named_slice(run_dir, "y0001.00cm")
+    (run_dir / "y0002.00cm").mkdir()  # matches pattern but has no frames
+
+    result = _invoke_composite(["auto_scan-run", "--commit"])
+
+    assert result.exit_code != 0
+    assert "NOT committed" in result.output
+    with pytest.raises(subprocess.CalledProcessError):
+        _git(tmp_path, "rev-parse", "HEAD")  # no commit was created
