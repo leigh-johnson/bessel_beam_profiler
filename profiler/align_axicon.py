@@ -1689,3 +1689,33 @@ def append_cycle_log(path, result: CycleResult) -> None:
 
     with open(path, "a") as handle:
         handle.write(json.dumps(result.to_jsonable()) + "\n")
+
+
+def reference_snapshot_name(
+    references: dict[float, tuple[float, float]],
+) -> Optional[str]:
+    """
+    Filename for the extra preview snapshot saved when `r` sets the
+    alignment reference: the reference center coordinates are baked
+    into the name so every reference-set moment leaves its own record
+    next to preview_latest/final.png (which keep getting overwritten).
+
+    Single plane:  preview_r=X60.123_Z-59.876.png
+    Two planes:    preview_r=Y10_X60.123_Z-59.876__Y130_X60.400_Z-59.900.png
+
+    Returns None when no reference exists yet (r pressed before the
+    first ring fit) — nothing to name, nothing to save.
+    """
+
+    if not references:
+        return None
+
+    planes = sorted(references.items())
+    if len(planes) == 1:
+        (_, (x, z)), = planes
+        return f"preview_r=X{x:.3f}_Z{z:.3f}.png"
+
+    groups = [
+        f"Y{y:g}_X{x:.3f}_Z{z:.3f}" for y, (x, z) in planes
+    ]
+    return "preview_r=" + "__".join(groups) + ".png"

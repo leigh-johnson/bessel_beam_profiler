@@ -472,6 +472,41 @@ def test_reference_offset_reads_zero_then_tracks_center_shift(modules, tmp_path)
     assert abs(result.Offset_mm[1]) < 0.1
 
 
+def test_reference_snapshot_name_encodes_coords(modules):
+    align = modules.align
+
+    # No reference yet (r pressed before the first fit): nothing to save.
+    assert align.reference_snapshot_name({}) is None
+
+    single = align.reference_snapshot_name({20.0: (60.1234, -59.8764)})
+    assert single == "preview_r=X60.123_Z-59.876.png"
+
+    # Two-plane patrol: one Y-labelled group per plane, sorted by Y.
+    double = align.reference_snapshot_name(
+        {130.0: (60.4, -59.9), 10.0: (60.1234, -59.8764)}
+    )
+    assert double == (
+        "preview_r=Y10_X60.123_Z-59.876__Y130_X60.400_Z-59.900.png"
+    )
+
+
+def test_reference_snapshot_name_tracks_session_reference(modules, tmp_path):
+    session, writer, scene = make_session(modules, tmp_path)
+
+    assert modules.align.reference_snapshot_name(session.references) is None
+
+    run_cycles(session, 1)
+    session.set_reference_here()
+
+    name = modules.align.reference_snapshot_name(session.references)
+    assert name is not None
+    assert name.startswith("preview_r=") and name.endswith(".png")
+
+    cx, cz = session.references[session.config.MachineY_mm]
+    assert f"X{cx:.3f}" in name
+    assert f"Z{cz:.3f}" in name
+
+
 def test_two_plane_patrol_reports_pointing_tilt(modules, tmp_path):
     slope = 0.01  # mm of center-X per mm of Y -> 10 mrad
 

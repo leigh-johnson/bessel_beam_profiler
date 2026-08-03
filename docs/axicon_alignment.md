@@ -103,6 +103,13 @@ Keys: `r` = set reference to the current fitted center, `o` = run an
 orbit lap now (stream mode), `f` = re-run the find-beam bootstrap
 (stream mode), `q` = quit (closing the window also quits).
 
+Each `r` press also saves a `preview_r=<coords>.png` snapshot into the
+run directory, named with the reference center it just set (e.g.
+`preview_r=X60.123_Z-59.876.png`; two-plane runs get one
+`Y<plane>_X<x>_Z<z>` group per plane) — a permanent record of each
+reference-set moment, since `preview_latest.png` keeps being
+overwritten.
+
 ## Fast feedback recipe (turning adjusters)
 
 Patrol laps are for surveying; for a tight adjust-watch-adjust loop
@@ -185,6 +192,8 @@ Each session makes one timestamped run directory under
 - `preview_latest.png` / `preview_final.png` — window snapshots
   (also written in `--no-display` mode, so a headless run can be
   watched by refreshing the PNG)
+- `preview_r=<coords>.png` — one snapshot per `r` press, named with
+  the reference center coordinates set at that moment
 - `align.log` — full log, same format as scan.log
 
 ## Module map
