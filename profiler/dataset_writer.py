@@ -45,6 +45,12 @@ class DatasetWriterConfig:
     # the timeout-and-retry penalty at every raster point.
     TriggerArmDelay_s: float = 0.1
 
+    # Pause before restarting acquisition after in-place re-triggers fail
+    # (persistent -1011). Gives a congested/stalled camera link a moment
+    # to drain before the stream restart; observed 2026-08-03 alongside
+    # FluidNC WiFi drops and Slack post timeouts (flaky lab network).
+    StallRecoveryPause_s: float = 3.0
+
     # Save uint8 / uint16 arrays in binary numpy format.
     # We can encode to BMP or PNG later, but want to avoid any lossy compression at this stage.
     ImageExtension: str = ".npy"
@@ -357,31 +363,7 @@ class FLIRDatasetWriter(FLIRCameraControllerBase):
                 try:
                     record = self._acquire_one_frame(point, shot_idx)
                 except DatasetWriterError as ex:
-                    if not self._is_camera_removed_error(ex):
-                        raise
-
-                    # Camera dropped off the bus mid-shot (e.g. an
-                    # Ethernet blip on the moving cable run). Position is
-                    # untouched — reconnect and retry this shot once.
-                    logger.warning(
-                        f"Camera removal during shot {shot_idx} at "
-                        f"{point.GantryPosition_mm}: {ex}"
-                    )
-
-                    try:
-                        self._end_acquisition()
-                    except Exception as end_ex:  # noqa: BLE001 - dead handle
-                        logger.warning(
-                            f"EndAcquisition on removed camera: {end_ex}"
-                        )
-
-                    self.reconnect()
-                    self._begin_acquisition()
-
-                    if self.config.TriggerArmDelay_s > 0:
-                        time.sleep(self.config.TriggerArmDelay_s)
-
-                    record = self._acquire_one_frame(point, shot_idx)
+                    record = self._recover_shot(point, shot_idx, ex)
 
                 self._append_manifest(record)
                 records.append(record)
@@ -450,6 +432,93 @@ class FLIRDatasetWriter(FLIRCameraControllerBase):
                 # cleanup (Spinnaker error -1004).
                 image_result = None
 
+    def _restart_acquisition(
+        self,
+        *,
+        reconnect: bool,
+        pause_s: float = 0.0,
+    ) -> None:
+        """
+        End the current stream and start a fresh one, optionally doing a
+        full camera reconnect (reopen by serial + re-apply settings) in
+        between. Used by the mid-shot recovery ladder.
+        """
+
+        try:
+            self._end_acquisition()
+        except Exception as end_ex:  # noqa: BLE001 - dead handle
+            logger.warning(
+                f"EndAcquisition during acquisition restart failed: {end_ex}"
+            )
+
+        if pause_s > 0:
+            time.sleep(pause_s)
+
+        if reconnect:
+            self.reconnect()
+
+        self._begin_acquisition()
+
+        if self.config.TriggerArmDelay_s > 0:
+            time.sleep(self.config.TriggerArmDelay_s)
+
+    def _recover_shot(
+        self,
+        point: ScanPoint,
+        shot_idx: int,
+        ex: DatasetWriterError,
+    ) -> FrameRecord:
+        """
+        Mid-shot recovery ladder. Position is untouched in every branch,
+        so retrying the shot is always safe.
+
+        -1024 (bus removal, e.g. an Ethernet blip on the moving cable
+        run): full reconnect, retry the shot once.
+
+        -1011 (GetNextImage timeout AFTER the in-place re-triggers in
+        _trigger_and_get_image were exhausted — a stalled stream or a
+        network blackout, not a single dropped trigger): restart the
+        stream after a pause and retry; if the stall persists, escalate
+        to a full reconnect before giving up. Observed 2026-08-03
+        killing auto scans in step with FluidNC WiFi drops.
+        """
+
+        if self._is_camera_removed_error(ex):
+            logger.warning(
+                f"Camera removal during shot {shot_idx} at "
+                f"{point.GantryPosition_mm}: {ex}"
+            )
+            self._restart_acquisition(reconnect=True)
+            return self._acquire_one_frame(point, shot_idx)
+
+        if self._is_timeout_error(ex):
+            logger.warning(
+                f"Persistent GetNextImage timeout during shot {shot_idx} at "
+                f"{point.GantryPosition_mm}: {ex} — restarting acquisition "
+                f"after a {self.config.StallRecoveryPause_s:g} s pause."
+            )
+            self._restart_acquisition(
+                reconnect=False,
+                pause_s=self.config.StallRecoveryPause_s,
+            )
+
+            try:
+                return self._acquire_one_frame(point, shot_idx)
+            except DatasetWriterError as retry_ex:
+                if not (
+                    self._is_timeout_error(retry_ex)
+                    or self._is_camera_removed_error(retry_ex)
+                ):
+                    raise
+                logger.warning(
+                    f"Acquisition restart did not recover the stream "
+                    f"({retry_ex}); escalating to a full camera reconnect."
+                )
+                self._restart_acquisition(reconnect=True)
+                return self._acquire_one_frame(point, shot_idx)
+
+        raise ex
+
     def reconnect(self) -> None:
         """
         Recover the camera after a bus removal (-1024): reopen (by serial),
@@ -474,6 +543,10 @@ class FLIRDatasetWriter(FLIRCameraControllerBase):
     def _is_camera_removed_error(ex: Exception) -> bool:
         message = str(ex)
         return "-1024" in message or "no longer valid" in message
+
+    @staticmethod
+    def _is_timeout_error(ex: Exception) -> bool:
+        return "-1011" in str(ex)
 
     def _trigger_and_get_image(self, retries: int = 2):
         """
