@@ -308,38 +308,165 @@ def test_persistent_trigger_timeout_still_raises(
     dataset_writer_module,
     coordinates_module,
     fake_pyspin,
+    monkeypatch,
     tmp_path,
 ):
+    """A camera that never delivers exhausts the whole recovery ladder
+    (re-triggers -> stream restart -> full reconnect) and still fails."""
+
     class DeadCamera(FakeCamera):
         def GetNextImage(self, timeout_ms):
             raise fake_pyspin.SpinnakerException("(GenTL error code: -1011) [-1011]")
 
+    cam = DeadCamera()
+
     writer = dataset_writer_module.FLIRDatasetWriter(
         camera_index=0,
-        cam=DeadCamera(),
+        cam=cam,
         camera_settings=FakeCameraSettings(),
         config=dataset_writer_module.DatasetWriterConfig(
-            JobType="unit_test", DatasetRoot=tmp_path
+            JobType="unit_test",
+            DatasetRoot=tmp_path,
+            TriggerArmDelay_s=0.0,
+            StallRecoveryPause_s=0.0,
         ),
         stage_controller=FastStageController(),
     )
     writer.prepare_run()
 
+    reopens = []
+    monkeypatch.setattr(writer, "reopen", lambda: reopens.append(True))
+
     with pytest.raises(dataset_writer_module.DatasetWriterError, match="-1011"):
         writer.acquire_scan([make_point(coordinates_module, nshots=1)])
 
+    # The ladder escalated all the way to a full reconnect before failing:
+    # 3 trigger attempts per acquisition pass, 3 passes.
+    assert reopens == [True]
+    assert cam.node_map.GetNode("TriggerSoftware").execute_count == 9
 
-def test_incomplete_image_releases_and_ends_acquisition(
+
+def make_stalled_camera(fake_pyspin, images, failures):
+    """A camera whose GetNextImage times out (-1011) for the first
+    `failures` grabs, then delivers normally — a stalled stream that
+    recovers, e.g. after a WiFi/network blackout."""
+
+    class StalledCamera(FakeCamera):
+        def __init__(self):
+            super().__init__(images=images)
+            self.failures_remaining = failures
+
+        def GetNextImage(self, timeout_ms):
+            if self.failures_remaining:
+                self.failures_remaining -= 1
+                raise fake_pyspin.SpinnakerException(
+                    "Spinnaker: Failed waiting for EventData on "
+                    "NEW_BUFFER_DATA event. (GenTL error code: -1011) [-1011]"
+                )
+            return super().GetNextImage(timeout_ms)
+
+    return StalledCamera()
+
+
+def test_stalled_stream_recovers_with_acquisition_restart(
+    dataset_writer_module,
+    coordinates_module,
+    fake_pyspin,
+    monkeypatch,
+    tmp_path,
+):
+    """All in-place re-triggers time out, but an acquisition restart
+    revives the stream — the scan survives without a full reconnect."""
+
+    arr = np.array([[5, 5], [5, 5]], dtype=np.uint8)
+    # 3 failures = the initial trigger + both in-place re-triggers.
+    cam = make_stalled_camera(fake_pyspin, [FakeImage(arr, frame_id=11)], failures=3)
+
+    writer = dataset_writer_module.FLIRDatasetWriter(
+        camera_index=0,
+        cam=cam,
+        camera_settings=FakeCameraSettings(),
+        config=dataset_writer_module.DatasetWriterConfig(
+            JobType="unit_test",
+            DatasetRoot=tmp_path,
+            TriggerArmDelay_s=0.0,
+            StallRecoveryPause_s=0.0,
+        ),
+        stage_controller=FastStageController(),
+    )
+    writer.prepare_run()
+
+    reopens = []
+    monkeypatch.setattr(writer, "reopen", lambda: reopens.append(True))
+
+    records = writer.acquire_scan([make_point(coordinates_module, nshots=1)])
+
+    assert len(records) == 1
+    assert records[0].Extra["FrameID"] == 11
+    assert reopens == []  # the stream restart alone was enough
+    # 3 timed-out triggers, then 1 successful one after the restart.
+    assert cam.node_map.GetNode("TriggerSoftware").execute_count == 4
+
+
+def test_stalled_stream_escalates_to_full_reconnect(
+    dataset_writer_module,
+    coordinates_module,
+    fake_pyspin,
+    monkeypatch,
+    tmp_path,
+):
+    """The stream restart alone does not revive the camera, but the full
+    reconnect does — the scan still survives."""
+
+    arr = np.array([[7, 7], [7, 7]], dtype=np.uint8)
+    # 6 failures = two full acquisition passes (3 triggers each): the
+    # original pass and the post-restart pass both time out.
+    cam = make_stalled_camera(fake_pyspin, [FakeImage(arr, frame_id=23)], failures=6)
+
+    writer = dataset_writer_module.FLIRDatasetWriter(
+        camera_index=0,
+        cam=cam,
+        camera_settings=FakeCameraSettings(),
+        config=dataset_writer_module.DatasetWriterConfig(
+            JobType="unit_test",
+            DatasetRoot=tmp_path,
+            TriggerArmDelay_s=0.0,
+            StallRecoveryPause_s=0.0,
+        ),
+        stage_controller=FastStageController(),
+    )
+    writer.prepare_run()
+
+    reopens = []
+    monkeypatch.setattr(writer, "reopen", lambda: reopens.append(True))
+
+    restores = []
+    writer.RestoreState = lambda: restores.append(True)
+
+    records = writer.acquire_scan([make_point(coordinates_module, nshots=1)])
+
+    assert len(records) == 1
+    assert records[0].Extra["FrameID"] == 23
+    assert reopens == [True]
+    assert restores == [True]  # slice exposure restored after the reconnect
+    assert cam.node_map.GetNode("TriggerSoftware").execute_count == 7
+
+
+def test_incomplete_image_is_released_and_retried(
     dataset_writer_module,
     coordinates_module,
     tmp_path,
 ):
-    image = FakeImage(
+    """One incomplete frame (lost stream packets) is released and
+    re-triggered in place; the complete retry frame is the one saved."""
+
+    bad = FakeImage(
         np.zeros((2, 2), dtype=np.uint16),
         incomplete=True,
         status=3,
     )
-    cam = FakeCamera(images=[image])
+    good = FakeImage(np.array([[1, 2], [3, 4]], dtype=np.uint8), frame_id=31)
+    cam = FakeCamera(images=[bad, good])
 
     writer = dataset_writer_module.FLIRDatasetWriter(
         camera_index=0,
@@ -348,17 +475,60 @@ def test_incomplete_image_releases_and_ends_acquisition(
         config=dataset_writer_module.DatasetWriterConfig(JobType="unit_test", DatasetRoot=tmp_path),
         stage_controller=FastStageController(),
     )
-    writer.signals.MovementComplete.set()
+    writer.prepare_run()
+
+    records = writer.acquire_scan([make_point(coordinates_module, nshots=1)])
+
+    assert len(records) == 1
+    assert records[0].Extra["FrameID"] == 31
+    assert bad.released is True
+    assert cam.events == ["begin", "get:2000", "get:2000", "end"]
+    assert cam.node_map.GetNode("TriggerSoftware").execute_count == 2
+
+
+def test_persistent_incomplete_images_exhaust_ladder_and_raise(
+    dataset_writer_module,
+    coordinates_module,
+    monkeypatch,
+    tmp_path,
+):
+    """A stream that only ever delivers incomplete frames walks the whole
+    recovery ladder (re-triggers -> restart -> reconnect), releases every
+    frame, and still fails with the incomplete-image error."""
+
+    # 9 grabs = 3 trigger attempts per acquisition pass, 3 passes.
+    images = [
+        FakeImage(np.zeros((2, 2), dtype=np.uint16), incomplete=True, status=3)
+        for _ in range(9)
+    ]
+    cam = FakeCamera(images=list(images))
+
+    writer = dataset_writer_module.FLIRDatasetWriter(
+        camera_index=0,
+        cam=cam,
+        camera_settings=FakeCameraSettings(),
+        config=dataset_writer_module.DatasetWriterConfig(
+            JobType="unit_test",
+            DatasetRoot=tmp_path,
+            TriggerArmDelay_s=0.0,
+            StallRecoveryPause_s=0.0,
+        ),
+        stage_controller=FastStageController(),
+    )
+    writer.prepare_run()
+
+    reopens = []
+    monkeypatch.setattr(writer, "reopen", lambda: reopens.append(True))
 
     with pytest.raises(
         dataset_writer_module.DatasetWriterError,
         match="Image incomplete; image status = 3",
     ):
-        writer._acquire_point_frames(make_point(coordinates_module))
+        writer.acquire_scan([make_point(coordinates_module, nshots=1)])
 
-    assert image.released is True
-    assert cam.events == ["begin", "get:2000", "end"]
-    assert cam.node_map.GetNode("TriggerSoftware").execute_count == 1
+    assert reopens == [True]
+    assert all(img.released for img in images)
+    assert cam.node_map.GetNode("TriggerSoftware").execute_count == 9
 
 # ---------------------------------------------------------------------------
 # Camera bus removal (-1024): reconnect and retry the shot

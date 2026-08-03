@@ -47,10 +47,14 @@ drag the geometry.
    chords. Each column's chord is the ENVELOPE of its lit extent (a
    chord of the beam's outer boundary — valid for thin rings AND broad
    bands whose columns miss the dark hole); two chords pin down center
-   and radius (`h^2 = r^2 - (x - cx)^2`), no prior needed. The first
-   full lap's fit then replaces the seed unclamped; after that,
-   estimate changes are clamped to `--max-shift` (default 3 mm) per
-   lap.
+   and radius (`h^2 = r^2 - (x - cx)^2`), no prior needed. If both
+   second columns at `+/---survey-dx` see nothing — a COMPACT pattern
+   like the focused Bessel region after axicon 3 can be narrower than
+   the default 5 mm spacing — the survey automatically retries with a
+   dx scaled to the extent column 1 measured (~0.7x its half-extent).
+   The first full lap's fit then replaces the seed unclamped; after
+   that, estimate changes are clamped to `--max-shift` (default 3 mm)
+   per lap.
 2. **Patrol cycle**: `--stations` (default 8) points spaced around the
    ring estimate, one frame each. Lit pixels are mapped to machine
    coordinates (composite.py's verified FlipX/FlipZ orientation and
@@ -103,6 +107,13 @@ Keys: `r` = set reference to the current fitted center, `o` = run an
 orbit lap now (stream mode), `f` = re-run the find-beam bootstrap
 (stream mode), `q` = quit (closing the window also quits).
 
+Each `r` press also saves a `preview_r=<coords>.png` snapshot into the
+run directory, named with the reference center it just set (e.g.
+`preview_r=X60.123_Z-59.876.png`; two-plane runs get one
+`Y<plane>_X<x>_Z<z>` group per plane) — a permanent record of each
+reference-set moment, since `preview_latest.png` keeps being
+overwritten.
+
 ## Fast feedback recipe (turning adjusters)
 
 Patrol laps are for surveying; for a tight adjust-watch-adjust loop
@@ -147,6 +158,28 @@ diameter grows along the beam works out of the box. Two things help:
   Remember the radius is the band's intensity-weighted centroid and is
   exposure-sensitive — pin `--max-exposure` when comparing.
 
+## Focused Bessel region (after axicon 3)
+
+In the focused region the pattern is a compact spot (bright core +
+close-in fringes), typically a few mm across or less — not a thin
+annulus. The tool still tracks it: the envelope chords solve the
+spot's outer boundary, and the per-angular-bin "ring locus" of a
+filled spot still centers the circle fit, so **center**, **offset**,
+and the two-plane **tilt** stay meaningful. Radius / width / roundness
+read the spot's intensity-weighted envelope instead of a band
+centroid. Parameter notes:
+
+- The survey auto-tightens its column spacing for compact beams, but
+  `--survey-dx 1` (or so) skips the two wasted full-Z columns at the
+  default 5 mm spacing (~1 min each).
+- DROP `--ring-diameter` here unless it's the spot's true envelope
+  diameter at that plane (use the Jul 29 r–y map). A too-big prior
+  (e.g. 10 mm for a ~2 mm spot) trips the sanity gate, which then
+  REPLACES the measured radius with the prior — the first patrol lap
+  orbits out in the dark and the ring is lost immediately.
+- Fewer stations cover a tiny orbit fine (`--stations 8`), and
+  `--cover ring` is enough: one frame already spans the whole spot.
+
 ## Other optics (e.g. after axicon 2)
 
 The tool is optic-agnostic — it finds and fits whatever ring the
@@ -185,6 +218,8 @@ Each session makes one timestamped run directory under
 - `preview_latest.png` / `preview_final.png` — window snapshots
   (also written in `--no-display` mode, so a headless run can be
   watched by refreshing the PNG)
+- `preview_r=<coords>.png` — one snapshot per `r` press, named with
+  the reference center coordinates set at that moment
 - `align.log` — full log, same format as scan.log
 
 ## Module map

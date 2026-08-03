@@ -9,7 +9,9 @@ optic, watch the numbers move, press r to zero the readout when happy.
 
 Every run writes an alignment_log.jsonl (one line of metrics per cycle)
 plus a preview_latest.png snapshot into a timestamped run directory —
-the before/after record of each alignment session.
+the before/after record of each alignment session. Each press of r
+additionally saves a preview_r=<coords>.png stamped with the reference
+center coordinates it just set.
 """
 
 from __future__ import annotations
@@ -94,7 +96,7 @@ logger = logging.getLogger(__name__)
 )
 @click.option("--ring-diameter", default=None, type=float, help="Expected ring diameter (mm) at the --y plane — sanity bound for the chord survey, not required.")
 @click.option("--ring-diameter2", default=None, type=float, help="Expected ring diameter (mm) at the --y2 plane, when it differs from --ring-diameter (diverging cone, e.g. after axicon 1). Defaults to --ring-diameter.")
-@click.option("--survey-dx", default=5.0, show_default=True, type=float, help="X offset between the two bootstrap survey columns.")
+@click.option("--survey-dx", default=5.0, show_default=True, type=float, help="X offset between the two bootstrap survey columns. If the beam at the plane is narrower than this (e.g. the focused Bessel region), the survey automatically retries with a tighter spacing scaled to the beam's measured extent.")
 @click.option("--max-shift", default=3.0, show_default=True, type=click.FloatRange(min=0.1), help="Max ring-estimate change per lap (mm) after the first fit; raise for beams you expect to move a lot per adjustment.")
 @click.option("--max-exposure", default=None, type=click.FloatRange(min=100.0), help="Hard exposure ceiling (us). Dim beams otherwise calibrate to very long exposures; the background-referenced threshold detects dim rings fine, so capping (e.g. 100000) buys lap/stream speed.")
 # -- signal / imaging -------------------------------------------------------
@@ -178,6 +180,7 @@ def align(
         AlignError,
         AxiconAlignSession,
         append_cycle_log,
+        reference_snapshot_name,
     )
     from align_preview import AlignPreview
     from dataset_writer import DatasetWriterConfig, FLIRDatasetWriter
@@ -316,16 +319,27 @@ def align(
                 fg="yellow",
             )
 
-        def handle_reference() -> None:
-            if preview.reference_requested:
-                preview.reference_requested = False
-                session.set_reference_here()
+        def handle_reference():
+            """
+            Consume a pending r-press. Returns the coordinate-stamped
+            snapshot path (preview_r=<coords>.png) to save AFTER the
+            next redraw — so the saved image shows the ring as it was
+            when the reference was set — or None if nothing is pending.
+            """
+            if not preview.reference_requested:
+                return None
+            preview.reference_requested = False
+            session.set_reference_here()
+            name = reference_snapshot_name(session.references)
+            return (run_dir / name) if name is not None else None
 
         def on_cycle(result, frames) -> bool:
-            handle_reference()
+            reference_snapshot = handle_reference()
             append_cycle_log(cycle_log, result)
             preview.update(result, frames)
             preview.save_png(run_dir / "preview_latest.png")
+            if reference_snapshot is not None:
+                preview.save_png(reference_snapshot)
             return not preview.quit_requested
 
         click.echo(
@@ -349,8 +363,10 @@ def align(
                     on_cycle(result, frames)
 
                 def on_frame(sample, frame) -> str:
-                    handle_reference()
+                    reference_snapshot = handle_reference()
                     preview.update_stream(sample, frame)
+                    if reference_snapshot is not None:
+                        preview.save_png(reference_snapshot)
                     if sample.Index % 20 == 0:
                         preview.save_png(run_dir / "preview_latest.png")
                     if preview.quit_requested:
