@@ -66,10 +66,11 @@ class ExposureCalibrationResult:
 
 
 def calibrate_exposure_interactive(
-   camera_index: int,
+    camera_index: int,
     base_settings: FLIRCameraSettings,
     output_json_path: Path,
     config: ExposureCalibrationConfig = ExposureCalibrationConfig(),
+    camera_serial: str | None = None,
 ) -> ExposureCalibrationResult:
     """
     Interactive exposure calibration at one fixed camera/stage position.
@@ -104,7 +105,9 @@ def calibrate_exposure_interactive(
     )
 
     print("Initializing camera controller")
-    flir_camera_controller = FLIRCameraControllerBase(camera_index, settings)
+    flir_camera_controller = FLIRCameraControllerBase(
+        camera_index, settings, camera_serial=camera_serial
+    )
     print(f"Applying camera settings: {settings}")
 
     flir_camera_controller.apply_settings()

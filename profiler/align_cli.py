@@ -47,7 +47,7 @@ logger = logging.getLogger(__name__)
 @click.option("--camera-index", default=0, show_default=True, type=click.IntRange(min=0))
 @click.option(
     "--camera-serial",
-    default=None,
+    default=24520699,
     type=str,
     help="Open the camera with this DeviceSerialNumber (e.g. 24520699) "
     "instead of trusting enumeration order. Takes precedence over "
