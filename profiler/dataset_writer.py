@@ -397,10 +397,6 @@ class FLIRDatasetWriter(FLIRCameraControllerBase):
         try:
             image_result = self._trigger_and_get_image()
 
-            if image_result.IsIncomplete():
-                status = image_result.GetImageStatus()
-                raise DatasetWriterError(f"Image incomplete; image status = {status}")
-
             image_data = image_result.GetNDArray()
             self.signals.FrameBuffered.set()
 
@@ -475,12 +471,13 @@ class FLIRDatasetWriter(FLIRCameraControllerBase):
         -1024 (bus removal, e.g. an Ethernet blip on the moving cable
         run): full reconnect, retry the shot once.
 
-        -1011 (GetNextImage timeout AFTER the in-place re-triggers in
-        _trigger_and_get_image were exhausted — a stalled stream or a
-        network blackout, not a single dropped trigger): restart the
-        stream after a pause and retry; if the stall persists, escalate
-        to a full reconnect before giving up. Observed 2026-08-03
-        killing auto scans in step with FluidNC WiFi drops.
+        -1011 timeouts and INCOMPLETE images (lost stream packets) AFTER
+        the in-place re-triggers in _trigger_and_get_image were exhausted
+        — a stalled stream or a network blackout, not a single dropped
+        trigger/packet: restart the stream after a pause and retry; if
+        the stall persists, escalate to a full reconnect before giving
+        up. Both observed 2026-08-03 killing auto scans in step with
+        FluidNC WiFi drops.
         """
 
         if self._is_camera_removed_error(ex):
@@ -491,9 +488,9 @@ class FLIRDatasetWriter(FLIRCameraControllerBase):
             self._restart_acquisition(reconnect=True)
             return self._acquire_one_frame(point, shot_idx)
 
-        if self._is_timeout_error(ex):
+        if self._is_timeout_error(ex) or self._is_incomplete_image_error(ex):
             logger.warning(
-                f"Persistent GetNextImage timeout during shot {shot_idx} at "
+                f"Persistent acquisition failure during shot {shot_idx} at "
                 f"{point.GantryPosition_mm}: {ex} — restarting acquisition "
                 f"after a {self.config.StallRecoveryPause_s:g} s pause."
             )
@@ -507,6 +504,7 @@ class FLIRDatasetWriter(FLIRCameraControllerBase):
             except DatasetWriterError as retry_ex:
                 if not (
                     self._is_timeout_error(retry_ex)
+                    or self._is_incomplete_image_error(retry_ex)
                     or self._is_camera_removed_error(retry_ex)
                 ):
                     raise
@@ -548,15 +546,24 @@ class FLIRDatasetWriter(FLIRCameraControllerBase):
     def _is_timeout_error(ex: Exception) -> bool:
         return "-1011" in str(ex)
 
+    @staticmethod
+    def _is_incomplete_image_error(ex: Exception) -> bool:
+        return "Image incomplete" in str(ex)
+
     def _trigger_and_get_image(self, retries: int = 2):
         """
-        Software-trigger the camera and fetch the resulting image.
+        Software-trigger the camera and fetch a COMPLETE image.
 
-        A trigger executed while the camera is still (re-)arming after
-        BeginAcquisition can be silently dropped, which surfaces as a
-        GenTL -1011 timeout on GetNextImage even though the camera is
-        healthy. Re-triggering recovers it, so retry a couple of times
-        before giving up.
+        Two transient failure modes share the retry budget, both seen on
+        the flaky lab network 2026-08-03:
+
+        - A trigger executed while the camera is still (re-)arming after
+          BeginAcquisition can be silently dropped, which surfaces as a
+          GenTL -1011 timeout on GetNextImage even though the camera is
+          healthy. Re-triggering recovers it.
+        - Lost GVSP packets deliver an INCOMPLETE image (e.g. status 3,
+          missing packets). The frame data has holes, so it is released
+          and re-triggered rather than saved.
         """
 
         attempt = 0
@@ -565,7 +572,9 @@ class FLIRDatasetWriter(FLIRCameraControllerBase):
             self._execute_software_trigger()
 
             try:
-                return self.cam.GetNextImage(self.config.AcquisitionTimeout_ms)
+                image_result = self.cam.GetNextImage(
+                    self.config.AcquisitionTimeout_ms
+                )
             except PySpin.SpinnakerException as ex:
                 if attempt < retries and "-1011" in str(ex):
                     attempt += 1
@@ -577,6 +586,24 @@ class FLIRDatasetWriter(FLIRCameraControllerBase):
                     )
                     continue
                 raise
+
+            if not image_result.IsIncomplete():
+                return image_result
+
+            status = image_result.GetImageStatus()
+            image_result.Release()
+
+            if attempt < retries:
+                attempt += 1
+                logger.warning(
+                    f"Incomplete image (status {status}; lost stream "
+                    f"packets?); re-triggering (attempt {attempt}/{retries})."
+                )
+                continue
+
+            raise DatasetWriterError(
+                f"Image incomplete; image status = {status}"
+            )
 
     def save_frame_array(
         self,
