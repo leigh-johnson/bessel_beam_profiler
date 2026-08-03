@@ -1027,9 +1027,29 @@ class AxiconAlignSession:
                 "though find-beam hit there — exposure may have drifted."
             )
 
-        # Second column: prefer +dx, fall back to -dx (ring may end
-        # before the machine limit on one side).
-        for dx in (self.config.SurveyDX_mm, -self.config.SurveyDX_mm):
+        # Beam Z-extent at the first column: for a COMPACT pattern (the
+        # focused Bessel region after axicon 3 is a few mm across, not a
+        # 20 mm annulus) the configured --survey-dx can step clear over
+        # the whole beam, so scale a fallback dx to what column 1 saw.
+        z_lo = min(iv[0] for iv in intervals1)
+        z_hi = max(iv[1] for iv in intervals1)
+        half_extent = (z_hi - z_lo) / 2.0
+        logger.info(
+            f"Survey column at X{x1:g}: {len(intervals1)} lit "
+            f"interval(s), Z {z_lo:.2f}..{z_hi:.2f} mm "
+            f"(envelope half-extent {half_extent:.2f} mm)."
+        )
+
+        # Candidate second-column offsets: the configured spacing first
+        # (+dx, then -dx: the ring may end before the machine limit on
+        # one side), then — only when the beam looks smaller than that
+        # spacing — a tighter pair scaled to the measured extent.
+        candidates = [self.config.SurveyDX_mm, -self.config.SurveyDX_mm]
+        adaptive = max(0.7 * half_extent, 4.0 * self.config.mm_per_px())
+        if adaptive < 0.9 * self.config.SurveyDX_mm:
+            candidates += [adaptive, -adaptive]
+
+        for dx in candidates:
             x2 = x1 + dx
             if not (
                 self.machine_limits.x_min_mm <= x2 <= self.machine_limits.x_max_mm
@@ -1037,17 +1057,34 @@ class AxiconAlignSession:
                 continue
 
             intervals2 = self._survey_column(x2, machine_y_mm)
+            if not intervals2:
+                logger.info(
+                    f"Survey column at X{x2:g} (dx {dx:+g} mm) saw no "
+                    "beam — the pattern may be narrower than this "
+                    "column spacing."
+                )
             solution = solve_ring_from_chords(x1, intervals1, x2, intervals2)
 
             if solution is not None:
                 cx, cz, radius = solution
+                if abs(dx) < self.config.SurveyDX_mm:
+                    logger.info(
+                        f"Chord survey solved with a tightened column "
+                        f"spacing (dx {dx:+.2f} mm instead of "
+                        f"--survey-dx {self.config.SurveyDX_mm:g}): "
+                        "compact beam, e.g. the focused Bessel region."
+                    )
                 radius = self._sane_radius(radius, machine_y_mm)
                 return RingEstimate(cx, cz, radius)
 
         raise AlignError(
             "Chord survey could not solve the ring: only one usable "
-            "survey column. Try --probe-x closer to the ring center or "
-            "provide --ring-diameter."
+            f"survey column (tried dx "
+            f"{', '.join(f'{dx:+.2f}' for dx in candidates)} mm from "
+            f"X{x1:g}; the beam there spans ~{2 * half_extent:.1f} mm "
+            "in Z). Try --probe-x closer to the beam center, a "
+            "--survey-dx smaller than the beam's half-width, or check "
+            "that --ring-diameter matches this plane."
         )
 
     def _sane_radius(self, radius: float, machine_y_mm: float) -> float:

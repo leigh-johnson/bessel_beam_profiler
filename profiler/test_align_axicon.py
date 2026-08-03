@@ -472,6 +472,37 @@ def test_reference_offset_reads_zero_then_tracks_center_shift(modules, tmp_path)
     assert abs(result.Offset_mm[1]) < 0.1
 
 
+def test_bootstrap_tightens_survey_dx_for_compact_beam(modules, tmp_path):
+    """
+    Focused-Bessel-region regression (hardware 2026-08-03): the whole
+    pattern is < 1 mm in radius, so BOTH second survey columns at the
+    configured +/-SurveyDX miss it entirely — the survey must retry
+    with a spacing scaled to the extent column 1 measured, instead of
+    dying with "only one usable survey column".
+    """
+
+    scene = RingScene(
+        center=(60.0, -60.0),
+        semi_major=0.45,
+        semi_minor=0.43,
+        width_mm=0.18,
+    )
+    session, writer, scene = make_session(
+        modules,
+        tmp_path,
+        scene=scene,
+        Downsample=2,  # 0.1 mm/px: resolve the small ring
+        MinSignalPixels=10,
+        SurveyDX_mm=3.0,  # steps clear over the ~0.8 mm-radius spot
+    )
+
+    estimate = session.bootstrap(session.config.MachineY_mm)
+
+    assert abs(estimate.CenterX_mm - 60.0) < 0.4
+    assert abs(estimate.CenterZ_mm - (-60.0)) < 0.4
+    assert estimate.Radius_mm < 1.5
+
+
 def test_reference_snapshot_name_encodes_coords(modules):
     align = modules.align
 

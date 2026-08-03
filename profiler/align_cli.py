@@ -96,7 +96,7 @@ logger = logging.getLogger(__name__)
 )
 @click.option("--ring-diameter", default=None, type=float, help="Expected ring diameter (mm) at the --y plane — sanity bound for the chord survey, not required.")
 @click.option("--ring-diameter2", default=None, type=float, help="Expected ring diameter (mm) at the --y2 plane, when it differs from --ring-diameter (diverging cone, e.g. after axicon 1). Defaults to --ring-diameter.")
-@click.option("--survey-dx", default=5.0, show_default=True, type=float, help="X offset between the two bootstrap survey columns.")
+@click.option("--survey-dx", default=5.0, show_default=True, type=float, help="X offset between the two bootstrap survey columns. If the beam at the plane is narrower than this (e.g. the focused Bessel region), the survey automatically retries with a tighter spacing scaled to the beam's measured extent.")
 @click.option("--max-shift", default=3.0, show_default=True, type=click.FloatRange(min=0.1), help="Max ring-estimate change per lap (mm) after the first fit; raise for beams you expect to move a lot per adjustment.")
 @click.option("--max-exposure", default=None, type=click.FloatRange(min=100.0), help="Hard exposure ceiling (us). Dim beams otherwise calibrate to very long exposures; the background-referenced threshold detects dim rings fine, so capping (e.g. 100000) buys lap/stream speed.")
 # -- signal / imaging -------------------------------------------------------
