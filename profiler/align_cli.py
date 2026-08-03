@@ -45,6 +45,14 @@ logger = logging.getLogger(__name__)
     help="Path to a FLIRCameraSettings JSON file.",
 )
 @click.option("--camera-index", default=0, show_default=True, type=click.IntRange(min=0))
+@click.option(
+    "--camera-serial",
+    default=None,
+    type=str,
+    help="Open the camera with this DeviceSerialNumber (e.g. 24520699) "
+    "instead of trusting enumeration order. Takes precedence over "
+    "--camera-index; errors out (listing detected serials) if absent.",
+)
 @click.option("--acquisition-timeout-ms", default=2000, show_default=True, type=click.IntRange(min=1))
 # -- alignment geometry -----------------------------------------------------
 @click.option("--y", "machine_y", default=20.0, show_default=True, type=float, help="Machine Y plane to patrol (near the optic keeps the ring small).")
@@ -127,6 +135,7 @@ def align(
     soft_limit_margin: float,
     camera_settings_path,
     camera_index: int,
+    camera_serial,
     acquisition_timeout_ms: int,
     machine_y: float,
     machine_y2,
@@ -248,6 +257,7 @@ def align(
 
         writer = FLIRDatasetWriter(
             camera_index=camera_index,
+            camera_serial=camera_serial,
             camera_settings=camera_settings,
             config=DatasetWriterConfig(
                 JobType="align",
