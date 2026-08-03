@@ -4,8 +4,12 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Any, Literal, Optional
 import json
+import logging
 
 import PySpin
+
+
+logger = logging.getLogger(__name__)
 
 
 AutoMode = Literal["Off", "Once", "Continuous"]
@@ -391,12 +395,17 @@ class FLIRCameraSettings:
                 buffer_count.SetValue(self.StreamBufferCountManual)
 
         if self.DeviceLinkThroughputLimit is not None:
+            # The camera's accepted range depends on its current link/packet
+            # configuration (e.g. the min was observed at ~12 Mbps on the
+            # BFS-PGE-31S4M), so an out-of-range configured value is clamped
+            # to the nearest bound with a WARNING rather than aborting the run.
             _set_integer(
                 cam,
                 "DeviceLinkThroughputLimit",
                 self.DeviceLinkThroughputLimit,
                 strict,
                 messages,
+                clamp=True,
             )
         if self.GevSCPSPacketSize is not None:
             _set_integer(
@@ -557,7 +566,14 @@ def _set_integer(
     value: int,
     strict: bool,
     messages: list[str],
+    *,
+    clamp: bool = False,
 ) -> None:
+    """
+    With clamp=True, a value outside the camera's reported [min, max] is
+    clamped to the nearest bound and applied, with a WARNING logged,
+    instead of being treated as an error.
+    """
     node = _quickspin_node(cam, feature)
 
     if not _is_writable(node):
@@ -569,9 +585,19 @@ def _set_integer(
             lo = int(node.GetMin())
             hi = int(node.GetMax())
             if not (lo <= int(value) <= hi):
-                raise ValueError(
-                    f"{feature}={value} is outside camera range [{lo}, {hi}]."
-                )
+                if clamp:
+                    clamped = min(max(int(value), lo), hi)
+                    message = (
+                        f"{feature}={value} is outside camera range "
+                        f"[{lo}, {hi}]; clamping to {clamped}."
+                    )
+                    logger.warning(message)
+                    messages.append(message)
+                    value = clamped
+                else:
+                    raise ValueError(
+                        f"{feature}={value} is outside camera range [{lo}, {hi}]."
+                    )
 
         node.SetValue(int(value))
 
