@@ -169,6 +169,14 @@ def dataset() -> None:
     help="Index of the camera to use from PySpin.System.GetCameras().",
 )
 @click.option(
+    "--camera-serial",
+    default=24520699,
+    type=str,
+    help="Open the camera with this DeviceSerialNumber (e.g. 24520699) "
+    "instead of trusting enumeration order. Takes precedence over "
+    "--camera-index; errors out (listing detected serials) if absent.",
+)
+@click.option(
     "--acquisition-timeout-ms",
     default=2000,
     show_default=True,
@@ -210,6 +218,7 @@ def static(
     dataset_root: Path,
     nshots: int,
     camera_index: int,
+    camera_serial,
     acquisition_timeout_ms: int,
     settle_time_s: float,
     placement_id: str,
@@ -244,6 +253,7 @@ def static(
 
     writer = FLIRDatasetWriter(
         camera_index=camera_index,
+        camera_serial=camera_serial,
         camera_settings=camera_settings,
         config=config,
     )
@@ -303,6 +313,15 @@ def static(
     help="Index of the camera to use from PySpin.System.GetCameras().",
 )
 @click.option(
+    "--camera-serial",
+    default=24520699,
+    type=str,
+    help="Open the camera with this DeviceSerialNumber (e.g. 24520699) "
+    "instead of trusting enumeration order. Takes precedence over "
+    "--camera-index; errors out (listing detected serials) if absent. "
+    "Used for both the exposure calibration and the scan itself.",
+)
+@click.option(
     "--acquisition-timeout-ms",
     default=2000,
     show_default=True,
@@ -359,6 +378,7 @@ def manual(
     camera_settings_path: Path,
     dataset_root: Path,
     camera_index: int,
+    camera_serial,
     acquisition_timeout_ms: int,
     placement_id: str,
     preview_interval_s: float,
@@ -424,6 +444,7 @@ def manual(
 
     calibration_result = calibrate_exposure_interactive(
         camera_index=camera_index,
+        camera_serial=camera_serial,
         base_settings=base_settings,
         output_json_path=calibration_path,
         config=ExposureCalibrationConfig(
@@ -449,6 +470,7 @@ def manual(
 
     writer = FLIRDatasetWriter(
         camera_index=camera_index,
+        camera_serial=camera_serial,
         camera_settings=camera_settings,
         config=config,
     )

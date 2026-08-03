@@ -13,7 +13,14 @@ logger = logging.getLogger(__name__)
 class FLIRCameraError(RuntimeError):
     pass
 
-def _open_camera(camera_index: int) -> PySpin.Camera:
+def _open_camera(
+    camera_index: int,
+    camera_serial: str | None = None,
+) -> PySpin.Camera:
+    """
+    Open a camera by serial number (preferred: robust to bus enumeration
+    order) or by enumeration index when no serial is given.
+    """
 
     system = PySpin.System.GetInstance()
     cam_list = system.GetCameras()
@@ -23,6 +30,36 @@ def _open_camera(camera_index: int) -> PySpin.Camera:
 
     if num_cameras == 0:
         raise Exception("No FLIR cameras detected.")
+
+    if camera_serial is not None:
+        detected: list[str] = []
+        for index in range(num_cameras):
+            candidate = cam_list.GetByIndex(index)
+            try:
+                found = candidate.TLDevice.DeviceSerialNumber.GetValue()
+            except Exception as ex:  # noqa: BLE001 - keep scanning the bus
+                logger.warning(
+                    f"Could not read serial of camera {index} while "
+                    f"searching for {camera_serial!r}: {ex}"
+                )
+                detected.append("<unreadable>")
+                continue
+            detected.append(found)
+            if found == camera_serial:
+                cam = candidate
+                camera_index = index
+                break
+
+        if cam is None:
+            raise Exception(
+                f"No camera with serial {camera_serial!r} found. "
+                f"Detected {num_cameras} camera(s) with serial(s): "
+                f"{', '.join(detected)}."
+            )
+
+        cam.Init()
+        print(f"Opened camera serial {camera_serial} (index {camera_index})")
+        return system, cam_list, cam
 
     if camera_index >= num_cameras:
         raise Exception(
@@ -51,27 +88,37 @@ class FLIRCameraControllerBase:
         camera_index: int,
         camera_settings: FLIRCameraSettings,
         cam=None,
+        camera_serial: str | None = None,
     ) -> None:
         if cam is not None:
             # Dependency injection for unit tests: use the provided camera
             # object and skip PySpin system/camera discovery entirely.
             self.system, self.cam_list, self.cam = None, None, cam
         else:
-            self.system, self.cam_list, self.cam = _open_camera(camera_index)
+            # camera_serial (when given) takes precedence over camera_index.
+            self.system, self.cam_list, self.cam = _open_camera(
+                camera_index, camera_serial
+            )
 
         self.camera_index = camera_index
         self.camera_settings = camera_settings
 
         # Remembered so reopen() can find the SAME camera again even if
         # enumeration order changes after a bus removal (-1024).
-        self.camera_serial = None
+        self.camera_serial = camera_serial
         try:
             self.camera_serial = self.cam.TLDevice.DeviceSerialNumber.GetValue()
         except Exception as ex:  # noqa: BLE001 - serial is best-effort
-            logger.warning(
-                f"Could not read camera serial number ({ex}); reopen() will "
-                "fall back to the camera index."
-            )
+            if self.camera_serial is not None:
+                logger.warning(
+                    f"Could not read camera serial number ({ex}); keeping "
+                    f"the requested serial {self.camera_serial!r} for reopen()."
+                )
+            else:
+                logger.warning(
+                    f"Could not read camera serial number ({ex}); reopen() "
+                    "will fall back to the camera index."
+                )
 
     def __del__(self):
         try:

@@ -64,6 +64,14 @@ def resolve_scan_caps(limits, x_min, x_max, z_min, z_max):
     help="Path to a FLIRCameraSettings JSON file.",
 )
 @click.option("--camera-index", default=0, show_default=True, type=click.IntRange(min=0))
+@click.option(
+    "--camera-serial",
+    default=24520699,
+    type=str,
+    help="Open the camera with this DeviceSerialNumber (e.g. 24520699) "
+    "instead of trusting enumeration order. Takes precedence over "
+    "--camera-index; errors out (listing detected serials) if absent.",
+)
 @click.option("--acquisition-timeout-ms", default=2000, show_default=True, type=click.IntRange(min=1))
 @click.option("--nshots", default=1, show_default=True, type=click.IntRange(min=1), help="Shots per raster point.")
 @click.option("--settle-time-s", default=0.0, show_default=True, type=click.FloatRange(min=0.0), help="Extra pause between motion-complete and trigger.")
@@ -211,6 +219,7 @@ def auto_scan(
     soft_limit_margin: float,
     camera_settings_path,
     camera_index: int,
+    camera_serial,
     acquisition_timeout_ms: int,
     nshots: int,
     settle_time_s: float,
@@ -526,6 +535,7 @@ def auto_scan(
 
             writer = FLIRDatasetWriter(
                 camera_index=camera_index,
+                camera_serial=camera_serial,
                 camera_settings=camera_settings,
                 config=DatasetWriterConfig(
                     JobType=DatasetWriterJobType.AUTO_SCAN,

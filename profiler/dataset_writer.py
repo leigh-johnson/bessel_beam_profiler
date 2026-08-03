@@ -170,6 +170,7 @@ class FLIRDatasetWriter(FLIRCameraControllerBase):
         stage_controller: Optional[StageController] = None,
         signals: Optional[AcquisitionSignals] = None,
         cam: Optional[Any] = None,
+        camera_serial: Optional[str] = None,
     ):
 
         self.camera_index = camera_index
@@ -187,7 +188,9 @@ class FLIRDatasetWriter(FLIRCameraControllerBase):
         self.RestoreState = None
 
         # `cam` allows dependency injection of a fake camera for unit tests.
-        super().__init__(camera_index, camera_settings, cam=cam)
+        super().__init__(
+            camera_index, camera_settings, cam=cam, camera_serial=camera_serial
+        )
 
 
     def prepare_run(self) -> Path:

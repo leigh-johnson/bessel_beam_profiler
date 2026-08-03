@@ -14,9 +14,10 @@ MODULE_NAME = "calibration"
 
 
 class FakeCameraController:
-    def __init__(self, camera_index, camera_settings):
+    def __init__(self, camera_index, camera_settings, camera_serial=None):
         self.cam = camera_index
         self.camera_settings = camera_settings
+        self.camera_serial = camera_serial
         self.closed = False
 
     def apply_settings(self):
@@ -331,6 +332,42 @@ def test_plus_and_minus_keys_update_real_settings_result(
     # Initial apply, then '+', then '-'
     assert cam.ExposureTime.set_calls == [1000.0, 2000.0, 500.0]
 
+def test_camera_serial_is_forwarded_to_the_camera_controller(
+    modules,
+    monkeypatch,
+    tmp_path,
+):
+    calibration, camera_settings = modules
+
+    controllers = []
+
+    class RecordingController(FakeCameraController):
+        def __init__(self, camera_index, camera_settings, camera_serial=None):
+            super().__init__(camera_index, camera_settings, camera_serial)
+            controllers.append(self)
+
+    monkeypatch.setattr(calibration, "FLIRCameraControllerBase", RecordingController)
+
+    install_fake_matplotlib(monkeypatch, calibration, keys_by_pause={1: "q"})
+
+    cam = FakeCamera(
+        images=[FakeImage(np.array([[1, 2], [3, 4]], dtype=np.uint16))]
+    )
+
+    calibration.calibrate_exposure_interactive(
+        cam,
+        make_base_settings(camera_settings, exposure_us=1000.0),
+        output_json_path=tmp_path / "camera_settings.json",
+        config=calibration.ExposureCalibrationConfig(
+            AcquisitionTimeout_ms=123,
+            DisplayPause_s=0,
+        ),
+        camera_serial="24520699",
+    )
+
+    assert controllers[0].camera_serial == "24520699"
+
+
 def test_exposure_calibration_config_saturation_threshold():
     from calibration import ExposureCalibrationConfig
 
@@ -395,8 +432,8 @@ def test_error_in_acquisition_loop_closes_camera_and_drops_image_refs(
     controllers = []
 
     class RecordingController(FakeCameraController):
-        def __init__(self, camera_index, camera_settings):
-            super().__init__(camera_index, camera_settings)
+        def __init__(self, camera_index, camera_settings, camera_serial=None):
+            super().__init__(camera_index, camera_settings, camera_serial)
             controllers.append(self)
 
     monkeypatch.setattr(calibration, "FLIRCameraControllerBase", RecordingController)
