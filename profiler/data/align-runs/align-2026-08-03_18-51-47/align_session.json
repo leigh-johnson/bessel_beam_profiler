@@ -1,0 +1,10 @@
+{
+  "Optic": "axicon1",
+  "Notes": [],
+  "Mode": "patrol",
+  "MachineY_mm": 10.0,
+  "MachineY2_mm": 130.0,
+  "BeamDirection": "-y",
+  "Stations": 8,
+  "RingDiameterPrior_mm": 2.0
+}

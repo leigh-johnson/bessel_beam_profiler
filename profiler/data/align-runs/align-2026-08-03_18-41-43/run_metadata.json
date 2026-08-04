@@ -1,0 +1,20 @@
+{
+  "CreatedUTC": "2026-08-04T01:41:45.752233+00:00",
+  "RunDir": "data/align-runs/align-2026-08-03_18-41-43",
+  "Config": {
+    "JobType": "align",
+    "DatasetRoot": "data/align-runs",
+    "AcquisitionTimeout_ms": 2000,
+    "StageTimeout_s": 30.0,
+    "SettleTime_s": 0.0,
+    "TriggerArmDelay_s": 0.1,
+    "StallRecoveryPause_s": 3.0,
+    "ImageExtension": ".npy",
+    "GroupByYSubfolder": false
+  },
+  "CoordinateConvention": {
+    "GantryPosition_mm": "Local CNC/gantry coordinates used for motion commands.",
+    "TablePosition_mm": "Optics-table / beamline coordinates used for reconstruction.",
+    "PlacementID": "Physical placement of the CNC gantry on the optics table."
+  }
+}
