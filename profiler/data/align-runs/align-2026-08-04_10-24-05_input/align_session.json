@@ -1,0 +1,10 @@
+{
+  "Optic": "input",
+  "Notes": [],
+  "Mode": "gaussian",
+  "MachineY_mm": 130.0,
+  "MachineY2_mm": null,
+  "BeamDirection": "-y",
+  "Stations": 8,
+  "RingDiameterPrior_mm": null
+}
