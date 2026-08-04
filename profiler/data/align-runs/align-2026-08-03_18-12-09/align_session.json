@@ -1,0 +1,10 @@
+{
+  "Optic": "axicon3",
+  "Notes": [],
+  "Mode": "free",
+  "MachineY_mm": 100.0,
+  "MachineY2_mm": null,
+  "BeamDirection": "-y",
+  "Stations": 8,
+  "RingDiameterPrior_mm": null
+}

@@ -478,3 +478,304 @@ class AlignPreview:
 
     def close(self) -> None:
         self.plt.close(self.figure)
+
+
+class CorePreview:
+    """
+    Core-mode window (axicon 3): live image crop + X/Z chords + radial
+    mean + J0^2 fit — the interactive version of the core-frame gallery
+    panels.
+
+    Keys:  r         save a snapshot (figure PNG + raw crop .npy)
+           up/down   jog machine Y by +/- the configured step
+           f         re-run find-beam + exposure calibration here
+           q         quit (closing the window also quits)
+    """
+
+    def __init__(self, config: AlignConfig, display: bool = True):
+        import matplotlib
+
+        if not display:
+            matplotlib.use("Agg")
+
+        import matplotlib.pyplot as plt
+
+        self.plt = plt
+        self.config = config
+        self.display = display
+        self.quit_requested = False
+        self.save_requested = False
+        self.refind_requested = False
+        self.jog_up_requested = False
+        self.jog_down_requested = False
+
+        if display:
+            plt.ion()
+
+        self.figure = plt.figure("Axicon 3 core alignment", figsize=(12.5, 5.6))
+        grid = self.figure.add_gridspec(1, 2, width_ratios=[1.0, 1.6])
+        self.ax_image = self.figure.add_subplot(grid[0, 0])
+        self.ax_profile = self.figure.add_subplot(grid[0, 1])
+
+        self.figure.canvas.mpl_connect("key_press_event", self._on_key)
+        self.figure.canvas.mpl_connect("close_event", self._on_close)
+
+        self._status = self.figure.suptitle(
+            "Axicon 3 core alignment — bootstrapping (find-beam sweep)...",
+            fontsize=11,
+        )
+
+    def _on_key(self, event) -> None:
+        if event.key == "q":
+            self.quit_requested = True
+        elif event.key == "r":
+            self.save_requested = True
+        elif event.key == "f":
+            self.refind_requested = True
+        elif event.key == "up":
+            self.jog_up_requested = True
+        elif event.key == "down":
+            self.jog_down_requested = True
+
+    def _on_close(self, _event) -> None:
+        self.quit_requested = True
+
+    def _pump(self) -> None:
+        if self.display:
+            self.plt.pause(0.001)
+
+    def update_core(self, sample, frame) -> None:
+        from matplotlib.colors import PowerNorm
+
+        px_um = self.config.PixelSize_um
+        ax = self.ax_image
+        ax.clear()
+
+        if frame is not None and not sample.Lost:
+            crop_px = max(
+                8, int(round(self.config.CoreCropRadius_um / px_um))
+            )
+            ir = int(round(sample.CentroidRow_px))
+            ic = int(round(sample.CentroidCol_px))
+            r0, r1 = max(ir - crop_px, 0), min(ir + crop_px + 1, frame.shape[0])
+            c0, c1 = max(ic - crop_px, 0), min(ic + crop_px + 1, frame.shape[1])
+            crop = frame[r0:r1, c0:c1].astype(float)
+            extent = (
+                (c0 - sample.CentroidCol_px) * px_um,
+                (c1 - sample.CentroidCol_px) * px_um,
+                (r1 - sample.CentroidRow_px) * px_um,
+                (r0 - sample.CentroidRow_px) * px_um,
+            )
+            ax.imshow(
+                crop,
+                extent=extent,
+                cmap="inferno",
+                norm=PowerNorm(0.4, vmax=max(crop.max(), 1.0)),
+            )
+            ax.set_xlabel("x (um)")
+            ax.set_ylabel("z (um)")
+        else:
+            ax.text(0.5, 0.5, "no core found", ha="center", va="center",
+                    transform=ax.transAxes)
+            ax.set_xticks([]), ax.set_yticks([])
+
+        ax = self.ax_profile
+        ax.clear()
+
+        title = f"frame {sample.Index} — no fit"
+        if not sample.Lost and sample.XChord is not None:
+            ax.plot(*sample.XChord, ".", ms=3, color="tab:blue",
+                    label="X chord")
+            ax.plot(*sample.ZChord, ".", ms=3, color="tab:green",
+                    label="Z chord")
+            r_um, radial = sample.Radial
+            ax.plot(r_um, radial, "-", color="black", lw=1.0,
+                    label="radial (mean)")
+            ax.plot(-r_um, radial, "-", color="black", lw=1.0)
+            if sample.FitCurve is not None:
+                rf, cf = sample.FitCurve
+                ax.plot(rf, cf, "-", color="tab:red", lw=1.2,
+                        label="J0^2 fit to radial")
+                ax.plot(-rf, cf, "-", color="tab:red", lw=1.2)
+
+            ideal = sample.KrIdeal_per_m
+
+            def pct(k):
+                return (
+                    f"{(k / ideal - 1) * 100:+.1f}%"
+                    if (k and ideal) else "—"
+                )
+
+            title = (
+                f"kx {pct(sample.Kx_per_m)}, kz {pct(sample.Kz_per_m)}, "
+                f"kr {pct(sample.Kr_per_m)}"
+            )
+            if sample.Kr_per_m and sample.KrStd_per_m and ideal:
+                title += f" ± {sample.KrStd_per_m / ideal * 100:.1f}%"
+            title += " vs. ideal"
+            if sample.RmsOverA is not None:
+                title += f".  rms/A_fit = {sample.RmsOverA:.3f}"
+            if sample.Saturated:
+                title += "  [SATURATED]"
+
+        ax.set_title(title, fontsize=9)
+        ax.set_xlabel("position (um) — X/Z chords and +/- r")
+        ax.set_ylabel("(I - I_bg)/T (counts/us)")
+        ax.grid(alpha=0.3)
+        ax.legend(fontsize=8, loc="upper right")
+
+        state = "CORE LOST" if sample.Lost else "streaming"
+        self._status.set_text(
+            f"Axicon 3 core — machine Y {sample.MachineY_mm:g} mm, "
+            f"park (X {sample.ParkX_mm:g}, Z {sample.ParkZ_mm:g}), "
+            f"T {sample.Exposure_us:.0f} us: {state} "
+            f"({sample.Elapsed_s:.2f} s/frame)   "
+            "[r = save, up/down = jog Y, f = re-find, q = quit]"
+        )
+        self.figure.canvas.draw_idle()
+        self._pump()
+
+    def save_png(self, path) -> Optional[str]:
+        try:
+            self.figure.savefig(path, dpi=110, facecolor="white")
+            return str(path)
+        except Exception as ex:  # noqa: BLE001 - snapshot is best-effort
+            logger.warning(f"Could not save the core snapshot: {ex}")
+            return None
+
+    def close(self) -> None:
+        self.plt.close(self.figure)
+
+
+class FreePreview:
+    """
+    Free-stream window: the WHOLE downsampled frame in machine
+    coordinates (axes = machine X / Z, so the view pans as you jog) —
+    no fits, no compositing, just live pixels + a position readout.
+
+    Keys (same bindings work typed into the launching TERMINAL, so the
+    window never needs focus — see term_keys.py):
+
+        arrows      jog X (left/right) and Z (up/down)
+        , / .       jog Y upstream / downstream (also < / >)
+        - / =       halve / double the jog step
+        e / E       exposure down / up (switches auto-exposure OFF)
+        a           toggle the auto-exposure servo
+        r           save a snapshot (figure PNG + raw frame .npy)
+        q           quit (closing the window also quits)
+    """
+
+    def __init__(self, config: AlignConfig, display: bool = True):
+        import matplotlib
+
+        if not display:
+            matplotlib.use("Agg")
+
+        import matplotlib.pyplot as plt
+
+        self.plt = plt
+        self.config = config
+        self.display = display
+        self.quit_requested = False
+        self.save_requested = False
+        self.pending_actions: list[str] = []
+
+        if display:
+            plt.ion()
+
+        self.figure = plt.figure("Live camera stream", figsize=(9.0, 7.2))
+        self.ax = self.figure.add_subplot(1, 1, 1)
+
+        self.figure.canvas.mpl_connect("key_press_event", self._on_key)
+        self.figure.canvas.mpl_connect("close_event", self._on_close)
+
+        self._status = self.figure.suptitle(
+            "Free stream — waiting for the first frame...", fontsize=11
+        )
+
+    def _on_key(self, event) -> None:
+        from align_axicon import FREE_KEY_ACTIONS
+
+        if event.key == "q":
+            self.quit_requested = True
+        elif event.key == "r":
+            self.save_requested = True
+        else:
+            action = FREE_KEY_ACTIONS.get(event.key)
+            if action is not None:
+                self.pending_actions.append(action)
+
+    def _on_close(self, _event) -> None:
+        self.quit_requested = True
+
+    def pop_action(self) -> Optional[str]:
+        """Oldest queued key action, or None (one applied per frame)."""
+
+        return self.pending_actions.pop(0) if self.pending_actions else None
+
+    def _pump(self) -> None:
+        if self.display:
+            self.plt.pause(0.001)
+
+    def update_free(self, sample, frame) -> None:
+        """Draw one FreeSample + its NATIVE oriented frame (or None)."""
+
+        from matplotlib.colors import PowerNorm
+
+        from composite import mean_pool
+
+        ax = self.ax
+        ax.clear()
+
+        if frame is not None:
+            view = mean_pool(frame, self.config.Downsample)
+            mm = self.config.mm_per_px()
+            height_mm = view.shape[0] * mm
+            width_mm = view.shape[1] * mm
+            extent = (
+                sample.MachineX_mm - width_mm / 2.0,
+                sample.MachineX_mm + width_mm / 2.0,
+                sample.MachineZ_mm - height_mm / 2.0,
+                sample.MachineZ_mm + height_mm / 2.0,
+            )
+            ax.imshow(
+                view,
+                extent=extent,
+                cmap="inferno",
+                norm=PowerNorm(0.4, vmax=max(float(view.max()), 1.0)),
+                origin="upper",
+            )
+            ax.set_xlabel("machine X (mm)")
+            ax.set_ylabel("machine Z (mm)")
+            title = f"frame {sample.Index} — peak {sample.Peak:g}"
+            if sample.Saturated:
+                title += "  [SATURATED]"
+        else:
+            ax.text(0.5, 0.5, "no frame", ha="center", va="center",
+                    transform=ax.transAxes)
+            ax.set_xticks([]), ax.set_yticks([])
+            title = f"frame {sample.Index} — NO FRAME"
+        ax.set_title(title, fontsize=10)
+
+        auto = "auto" if sample.AutoExposure else "MANUAL"
+        self._status.set_text(
+            f"X {sample.MachineX_mm:g}  Y {sample.MachineY_mm:g}  "
+            f"Z {sample.MachineZ_mm:g} mm — step {sample.JogStep_mm:g} mm, "
+            f"T {sample.Exposure_us:.0f} us ({auto}), "
+            f"{sample.Elapsed_s:.2f} s/frame   "
+            "[arrows = X/Z, ,/. = Y, -/= step, e/E exp, a auto, "
+            "r snap, q quit]"
+        )
+        self.figure.canvas.draw_idle()
+        self._pump()
+
+    def save_png(self, path) -> Optional[str]:
+        try:
+            self.figure.savefig(path, dpi=110, facecolor="white")
+            return str(path)
+        except Exception as ex:  # noqa: BLE001 - snapshot is best-effort
+            logger.warning(f"Could not save the free-stream snapshot: {ex}")
+            return None
+
+    def close(self) -> None:
+        self.plt.close(self.figure)
