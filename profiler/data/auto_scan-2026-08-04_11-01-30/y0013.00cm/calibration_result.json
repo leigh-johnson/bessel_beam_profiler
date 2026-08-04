@@ -1,0 +1,13 @@
+{
+  "MachineY_mm": 100.0,
+  "BeamY_mm": 130.0,
+  "MeasuredFrom": "gaussian_input",
+  "CalibrationX_mm": 25.0,
+  "CalibrationZ_mm": -92.1,
+  "FinalExposure_us": 43228.57142857142,
+  "LastMax": 148,
+  "LastSaturatedPixels": 0,
+  "Iterations": 3,
+  "Converged": true,
+  "Note": ""
+}
