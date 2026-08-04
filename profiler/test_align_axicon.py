@@ -876,3 +876,272 @@ def test_preview_stream_update_renders_headless(modules, tmp_path):
         assert len(captured) == 2
     finally:
         preview.close()
+
+
+# ---------------------------------------------------------------------------
+# Core mode (axicon 3): live J0^2 fits, Y jog
+# ---------------------------------------------------------------------------
+
+CORE_K_SCENE = 6012.0   # rad/m -> first zero 400 um = 8 fake pixels
+
+
+class CoreScene:
+    """Bessel core fixed at machine (60, -60): A*J0(k r)^2 * envelope."""
+
+    def __init__(self, k_per_m=CORE_K_SCENE, amplitude=150.0, background=5.0,
+                 reference_exposure_us=10_000.0):
+        self.params = dict(k=k_per_m, amplitude=amplitude,
+                           background=background,
+                           reference_exposure_us=reference_exposure_us)
+
+    def render(self, x_c, z_c, machine_y, exposure_us):
+        from scipy.special import j0
+
+        p = self.params
+        mm_per_px = PIXEL_UM / 1000.0
+        width_mm = SENSOR_COLS * mm_per_px
+        height_mm = SENSOR_ROWS * mm_per_px
+        x = x_c - width_mm / 2.0 + (np.arange(SENSOR_COLS) + 0.5) * mm_per_px
+        z = z_c + height_mm / 2.0 - (np.arange(SENSOR_ROWS) + 0.5) * mm_per_px
+        X, Z = np.meshgrid(x, z)
+        r_m = np.hypot(X - 60.0, Z + 60.0) * 1e-3
+        intensity = (
+            p["amplitude"]
+            * j0(p["k"] * r_m) ** 2
+            * np.exp(-((r_m / 3e-3) ** 2))
+        )
+        counts = p["background"] + intensity * (
+            exposure_us / p["reference_exposure_us"]
+        )
+        machine_frame = np.clip(counts, 0, 255).astype(np.uint8)
+        return machine_frame[::-1, ::-1]  # camera 180 deg vs machine axes
+
+
+def core_config_overrides():
+    return dict(
+        CoreKrIdeal_per_m=CORE_K_SCENE * 0.95,  # scene sits +5.3% vs "ideal"
+        CoreCropRadius_um=3000.0,
+    )
+
+
+def test_analyze_core_recovers_k_from_native_frame(modules):
+    scene = CoreScene()
+    config = align_config(modules, **core_config_overrides())
+    raw = scene.render(60.0, -60.0, 20.0, 10_000.0)
+    frame = modules.align.orient(raw, config.composite_config())
+
+    result = modules.align.analyze_core(frame, 10_000.0, 5.0, config)
+
+    assert result is not None
+    assert not result["saturated"]
+    assert abs(result["kr"] / CORE_K_SCENE - 1) < 0.02
+    assert abs(result["kx"] / CORE_K_SCENE - 1) < 0.05
+    assert abs(result["kz"] / CORE_K_SCENE - 1) < 0.05
+    assert result["rms_over_a"] < 0.06
+    # Centroid lands on the core (machine 60,-60 = frame center here).
+    assert abs(result["centroid_col"] - (SENSOR_COLS - 1) / 2) < 2.0
+    assert abs(result["centroid_row"] - (SENSOR_ROWS - 1) / 2) < 2.0
+
+
+def test_run_core_streams_fits_and_jogs_y(modules, tmp_path):
+    session, writer, scene = make_session(
+        modules, tmp_path, scene=CoreScene(), **core_config_overrides()
+    )
+
+    samples = []
+
+    def on_frame(sample, frame):
+        samples.append(sample)
+        if sample.Index == 1:
+            return modules.align.CORE_JOG_UP
+        if sample.Index == 3:
+            return modules.align.CORE_JOG_DOWN
+        if sample.Index >= 5:
+            return modules.align.CORE_STOP
+        return modules.align.CORE_CONTINUE
+
+    session.run_core(on_frame)
+
+    assert len(samples) == 6
+    assert all(not s.Lost for s in samples)
+    # Jogs: +10 mm after index 1, -10 mm after index 3 (default step).
+    assert samples[1].MachineY_mm == 20.0
+    assert samples[2].MachineY_mm == 30.0
+    assert samples[4].MachineY_mm == 20.0
+    # Fits track the scene k at every frame.
+    for s in samples:
+        assert s.Kr_per_m is not None
+        assert abs(s.Kr_per_m / CORE_K_SCENE - 1) < 0.02
+        assert s.XChord is not None and s.Radial is not None
+
+
+def test_run_core_jog_clamps_to_machine_envelope(modules, tmp_path):
+    session, writer, scene = make_session(
+        modules, tmp_path, scene=CoreScene(),
+        MachineY_mm=155.0, **core_config_overrides()
+    )
+
+    seen = []
+
+    def on_frame(sample, frame):
+        seen.append(sample.MachineY_mm)
+        if sample.Index == 0:
+            return modules.align.CORE_JOG_UP   # 165 > y_max 160 -> clamp
+        return modules.align.CORE_STOP
+
+    session.run_core(on_frame)
+
+    assert seen == [155.0, 160.0]
+
+
+def test_core_preview_renders_and_saves_headless(modules, tmp_path):
+    session, writer, scene = make_session(
+        modules, tmp_path, scene=CoreScene(), **core_config_overrides()
+    )
+    preview = modules.preview.CorePreview(
+        align_config(modules, **core_config_overrides()), display=False
+    )
+
+    captured = []
+
+    def on_frame(sample, frame):
+        preview.update_core(sample, frame)
+        captured.append(sample)
+        return (modules.align.CORE_STOP if sample.Index >= 1
+                else modules.align.CORE_CONTINUE)
+
+    try:
+        session.run_core(on_frame)
+        assert preview.save_png(tmp_path / "core.png") is not None
+        assert (tmp_path / "core.png").stat().st_size > 0
+        assert len(captured) == 2
+    finally:
+        preview.close()
+
+
+# ---------------------------------------------------------------------------
+# Free-stream mode (live view + manual jogging, no bootstrap)
+# ---------------------------------------------------------------------------
+
+
+def test_run_free_streams_and_jogs_all_axes(modules, tmp_path):
+    session, writer, scene = make_session(modules, tmp_path)
+
+    samples = []
+    script = {
+        0: modules.align.free_jog("x", +1),
+        1: modules.align.free_jog("y", -1),
+        2: modules.align.free_jog("z", +1),
+        3: modules.align.FREE_STEP_UP,
+        4: modules.align.free_jog("x", -1),
+    }
+
+    def on_frame(sample, frame):
+        samples.append(sample)
+        if sample.Index >= 5:
+            return modules.align.FREE_STOP
+        return script.get(sample.Index, modules.align.FREE_CONTINUE)
+
+    session.run_free(on_frame, auto_exposure=False)
+
+    positions = [
+        (s.MachineX_mm, s.MachineY_mm, s.MachineZ_mm) for s in samples
+    ]
+    # Defaults: X/Z envelope centers (60, -62), Y from config (20).
+    assert positions == [
+        (60.0, 20.0, -62.0),
+        (70.0, 20.0, -62.0),   # x +10
+        (70.0, 10.0, -62.0),   # y -10
+        (70.0, 10.0, -52.0),   # z +10
+        (70.0, 10.0, -52.0),   # step doubled: no motion
+        (50.0, 10.0, -52.0),   # x -20 with the doubled step
+    ]
+    assert samples[3].JogStep_mm == 10.0
+    assert samples[4].JogStep_mm == 20.0
+    assert not any(s.NoFrame for s in samples)
+
+    # The gantry really was commanded to each position.
+    last = writer.stage_controller.moved_to[-1]
+    assert (last.x_mm, last.y_mm, last.z_mm) == (50.0, 10.0, -52.0)
+
+
+def test_run_free_clamps_jogs_and_manual_exposure(modules, tmp_path):
+    session, writer, scene = make_session(modules, tmp_path)
+
+    samples = []
+
+    def on_frame(sample, frame):
+        samples.append(sample)
+        if sample.Index == 0:
+            return modules.align.free_jog("x", +1)  # 115+10 -> clamp 120
+        if sample.Index == 1:
+            return modules.align.FREE_EXP_DOWN
+        if sample.Index == 2:
+            return modules.align.FREE_EXP_AUTO
+        return modules.align.FREE_STOP
+
+    session.run_free(
+        on_frame, start_x_mm=115.0, exposure_us=9000.0, auto_exposure=False
+    )
+
+    assert samples[1].MachineX_mm == 120.0  # clamped to the envelope
+    assert samples[2].Exposure_us == pytest.approx(6000.0)  # 9000 / 1.5
+    assert samples[2].AutoExposure is False
+    assert samples[3].AutoExposure is True  # a toggled it back on
+
+
+def test_run_free_auto_exposure_halves_on_saturation(modules, tmp_path):
+    session, writer, scene = make_session(modules, tmp_path)
+
+    samples = []
+
+    def on_frame(sample, frame):
+        samples.append(sample)
+        return (modules.align.FREE_STOP if sample.Index >= 1
+                else modules.align.FREE_CONTINUE)
+
+    session.run_free(
+        on_frame, start_x_mm=60.0, start_z_mm=-62.0, exposure_us=40_000.0
+    )
+
+    assert samples[0].Saturated
+    assert samples[0].Exposure_us == pytest.approx(40_000.0)
+    assert samples[1].Exposure_us == pytest.approx(20_000.0)
+
+
+def test_free_preview_renders_saves_and_queues_key_actions(
+    modules, tmp_path
+):
+    session, writer, scene = make_session(modules, tmp_path)
+    preview = modules.preview.FreePreview(
+        align_config(modules), display=False
+    )
+
+    def on_frame(sample, frame):
+        preview.update_free(sample, frame)
+        return (modules.align.FREE_STOP if sample.Index >= 1
+                else modules.align.FREE_CONTINUE)
+
+    class FakeEvent:
+        def __init__(self, key):
+            self.key = key
+
+    try:
+        session.run_free(on_frame)
+        assert preview.save_png(tmp_path / "free.png") is not None
+        assert (tmp_path / "free.png").stat().st_size > 0
+
+        # Window keys queue the shared FREE_KEY_ACTIONS; unknown keys
+        # are ignored; q flips the quit flag instead of queueing.
+        for key in ("left", ".", "x", "q"):
+            preview._on_key(FakeEvent(key))
+        assert preview.pending_actions == [
+            modules.align.free_jog("x", -1),
+            modules.align.free_jog("y", +1),
+        ]
+        assert preview.quit_requested
+        assert preview.pop_action() == modules.align.free_jog("x", -1)
+        assert preview.pop_action() == modules.align.free_jog("y", +1)
+        assert preview.pop_action() is None
+    finally:
+        preview.close()

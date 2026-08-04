@@ -13,7 +13,7 @@ python cli.py align --y 20 --ring-diameter 12     # sanity prior for bootstrap
 python cli.py align --no-display --frames 100     # headless (SSH): log + PNGs only
 ```
 
-## Two modes
+## Four modes
 
 **stream** (default): after the bootstrap and ONE orbit lap, the gantry
 parks on the ring (brightest station, or `--park-azimuth`) and streams
@@ -27,6 +27,14 @@ uniformity and re-parks; `f` re-runs the find-beam bootstrap.
 **patrol**: orbit continuously; every lap refreshes ALL metrics
 (~10–20 s feedback latency, full-ring truth every time). Required for
 the two-plane tilt readout (`--y2`).
+
+**core** (default when `--optic` is axicon3): parked native-resolution
+streaming of the Bessel core with live J0² fits — see
+[Core mode](#core-mode-axicon-3).
+
+**free**: no bootstrap, no fitting — a live camera view with keyboard
+X/Y/Z jogging from the preview window or the terminal — see
+[Free-stream mode](#free-stream-mode-live-view--keyboard-jogging).
 
 Stations sit ON the fitted ring, so by default the composite has a
 blind spot in the middle — fine for a thin annulus, not for a broad
@@ -180,6 +188,76 @@ centroid. Parameter notes:
 - Fewer stations cover a tiny orbit fine (`--stations 8`), and
   `--cover ring` is enough: one frame already spans the whole spot.
 
+## Core mode (axicon 3)
+
+`--mode core` — the default whenever `--optic` is axicon3 — is for the
+focused Bessel core, where ring patrols are meaningless. It find-beams
+and calibrates at ONE fixed machine Y, parks, and streams
+NATIVE-resolution frames (3.45 um pixels — the ~60 um core would not
+survive downsampling). Every frame shows, live:
+
+- the image crop around the sub-pixel core centroid;
+- the X chord and Z chord through the centroid, the azimuthal-mean
+  radial profile (half-pixel bins), and a J0^2 fit to the radial —
+  with k_x, k_z, k_r quoted as % vs the ideal
+  k_r = k (n-1) tan(alpha3) (`--alpha3`, `--index-n`,
+  `--wavelength-nm`), plus rms/A_fit and a [SATURATED] flag.
+
+Keys: `r` = save a snapshot (`snapshots/core_y<Y>mm_NNN.png` figure +
+the raw frame as `.npy`), `up`/`down` = jog machine Y by `--jog-step`
+(default 10 mm, clamped to the envelope), `f` = re-run find-beam +
+calibration at the current Y (do this after several jogs — the servo
+tracks exposure between jogs, but a fresh calibration is better after
+big brightness changes), `q` = quit.
+
+```
+python cli.py align --optic axicon3 --y 100 --probe-x <x crossing the core>
+```
+
+The usual self-healing applies: consecutive lost frames re-run
+find-beam automatically, and a failed re-find backs off and keeps
+streaming.
+
+## Free-stream mode (live view + keyboard jogging)
+
+`--mode free` is the "just show me the camera" mode: NO bootstrap, no
+fitting, no compositing — the gantry moves to a start position and
+streams frames while you drive it around with the keyboard. Use it to
+hunt for a beam by eye, sanity-check what the sensor sees at a spot,
+or explore before committing to a scan.
+
+```
+python cli.py align --mode free --y 100 --x 60 --z -60 --exposure 5000
+```
+
+`--x`/`--z` default to the center of the machine envelope, `--y` to
+the usual `--y` default. The whole (downsampled) frame is drawn with
+its axes in MACHINE coordinates, so the view pans as you jog and you
+can read positions straight off the axes.
+
+Keys work in the preview window AND typed into the launching terminal
+(`term_keys.py` puts the tty in cbreak mode — no Enter needed, no
+window focus needed; the terminal path also works over SSH with
+`--no-display`, watching `preview_latest.png`):
+
+| Key | Action |
+| --- | --- |
+| arrows | jog X (left/right) and Z (up/down) |
+| `,` / `.` | jog Y upstream / downstream (also `<` / `>`) |
+| `-` / `=` | halve / double the jog step (start: `--jog-step`, 0.1–100 mm) |
+| `e` / `E` | exposure down / up ×1.5 (switches auto-exposure OFF) |
+| `a` | toggle the auto-exposure servo |
+| `r` | save a snapshot (`snapshots/free_X<x>_Y<y>_Z<z>mm_NNN.png` + raw `.npy`) |
+| `q` | quit |
+
+All jogs clamp to the machine envelope. Auto-exposure (on by default)
+is the same halve-on-saturation / double-when-dim servo as the other
+modes; with NO beam in view it walks exposure up to the cap, so
+frames slow down until something bright appears — press `a` if that
+gets annoying while slewing across dark regions. Every frame is
+logged to `free_log.jsonl` (position, exposure, peak) so a jog
+session leaves a breadcrumb trail of where you looked.
+
 ## Other optics (e.g. after axicon 2)
 
 The tool is optic-agnostic — it finds and fits whatever ring the
@@ -228,8 +306,11 @@ Each session makes one timestamped run directory under
   extraction, circle/ellipse fits, chord bootstrap, uniformity);
   wraps `AutoScanSession` for motion, find-beam, calibration, and
   reconnect handling.
-- `align_preview.py` — matplotlib window; owns no hardware.
+- `align_preview.py` — matplotlib windows; owns no hardware.
 - `align_cli.py` — `align` command; connection/limit-validation flow
   mirrors `dataset auto`.
+- `term_keys.py` — non-blocking cbreak-mode terminal key reader for
+  free mode (POSIX; degrades to window-keys-only on a non-tty).
 - `test_align_axicon.py` — synthetic-ring rig (fake camera renders
   whatever the fake gantry points at) + fit unit tests.
+- `test_term_keys.py` — escape-sequence parser + non-tty degradation.

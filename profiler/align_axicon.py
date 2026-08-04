@@ -97,6 +97,14 @@ class AlignConfig:
     # Chord-bootstrap survey columns: X offset between the two columns.
     SurveyDX_mm: float = 5.0
 
+    # Core mode (after axicon 3): live J0^2 fits of the Bessel core on
+    # NATIVE-resolution frames. Ideal radial wavevector for the "% vs
+    # ideal" readout, k_r = k (n-1) tan(alpha3); crop half-width around
+    # the core for chords/radial profile; Y jog step for the arrow keys.
+    CoreKrIdeal_per_m: float = 38_700.0   # 650 nm, n 1.4585, alpha3 0.5 deg
+    CoreCropRadius_um: float = 450.0
+    CoreJogStep_mm: float = 10.0
+
     # Ring-estimate update clamp per cycle (center AND radius), so one
     # bad fit cannot fling the patrol off the beam.
     MaxRingShift_mm: float = 3.0
@@ -1627,6 +1635,324 @@ class AxiconAlignSession:
         finally:
             self._end()
 
+    # -- core mode (axicon 3: live J0^2 fits, jog along Y) --------------
+
+    def grab_oriented_native(
+        self, x_mm: float, machine_y_mm: float, z_mm: float, retries: int = 2
+    ) -> Optional[np.ndarray]:
+        """Move, grab, orient — NO downsampling (the ~60 um core needs
+        native 3.45 um pixels; pooling would destroy the J0 fringes)."""
+
+        self.inner._move_to(x_mm, machine_y_mm, z_mm)
+        timeout_ms = self.writer.config.AcquisitionTimeout_ms
+
+        for _ in range(1 + retries):
+            arr = _grab_frame(self.writer, timeout_ms)
+            if arr is not None:
+                return orient(arr, self.config.composite_config())
+        return None
+
+    def bootstrap_core(self, machine_y_mm: float) -> tuple[float, float]:
+        """
+        find-beam sweep -> exposure calibration -> off-axis background.
+        No chord survey (there is no ring): the park point is wherever
+        find-beam located the structured light. Returns (x, z).
+        """
+
+        self._end()  # find_beam/calibrate manage their own acquisition
+
+        if not self.inner.find_beam(machine_y_mm):
+            raise AlignError(
+                "find-beam saw no structured light: check the beam is on "
+                "and the probe X crosses it (--probe-x)."
+            )
+
+        calibration = self.inner.calibrate_at(
+            machine_y_mm,
+            start_exposure_us=self.inner._current_exposure_us
+            or self.inner.config.FindBeamStartExposure_us,
+        )
+        logger.info(
+            f"Core-mode exposure at Y{machine_y_mm:g}: "
+            f"{calibration.FinalExposure_us:.0f} us "
+            f"(converged={calibration.Converged})"
+        )
+
+        cap = self.config.MaxExposure_us
+        current = self.inner._current_exposure_us
+        if cap is not None and current is not None and current > cap:
+            self.inner._set_exposure(cap)
+            logger.info(
+                f"Calibrated exposure {current:.0f} us exceeds the "
+                f"--max-exposure cap; clamping to {cap:.0f} us."
+            )
+
+        self._capture_background(machine_y_mm)
+        return self.inner._calibration_xz
+
+    def core_frame(
+        self, index: int, machine_y_mm: float, park: tuple[float, float]
+    ) -> tuple[CoreSample, Optional[np.ndarray]]:
+        """One parked native-resolution core measurement."""
+
+        started = time.monotonic()
+        park_x, park_z = park
+
+        frame = self.grab_oriented_native(park_x, machine_y_mm, park_z)
+        exposure = float(self.inner._current_exposure_us or 0.0)
+        background = self.background_level() or 0.0
+
+        analysis = (
+            analyze_core(frame, exposure, background, self.config)
+            if frame is not None
+            else None
+        )
+
+        if analysis is None:
+            self._exposure_servo(0.0, lost=True)
+            sample = CoreSample(
+                Index=index, MachineY_mm=machine_y_mm,
+                ParkX_mm=park_x, ParkZ_mm=park_z,
+                Exposure_us=exposure, Lost=True,
+                Elapsed_s=time.monotonic() - started,
+                KrIdeal_per_m=self.config.CoreKrIdeal_per_m,
+            )
+            return sample, frame
+
+        self._exposure_servo(analysis["peak"], lost=False)
+
+        sample = CoreSample(
+            Index=index, MachineY_mm=machine_y_mm,
+            ParkX_mm=park_x, ParkZ_mm=park_z,
+            Exposure_us=exposure, Lost=False,
+            Elapsed_s=time.monotonic() - started,
+            Peak=analysis["peak"], Saturated=analysis["saturated"],
+            CentroidCol_px=analysis["centroid_col"],
+            CentroidRow_px=analysis["centroid_row"],
+            XChord=analysis["x_chord"], ZChord=analysis["z_chord"],
+            Radial=analysis["radial"],
+            Kx_per_m=analysis["kx"], Kz_per_m=analysis["kz"],
+            Kr_per_m=analysis["kr"], KrStd_per_m=analysis["kr_std"],
+            FitCurve=analysis["fit_curve"], AFit=analysis["a_fit"],
+            RmsOverA=analysis["rms_over_a"],
+            KrIdeal_per_m=self.config.CoreKrIdeal_per_m,
+        )
+        return sample, frame
+
+    def run_core(
+        self,
+        on_frame: Callable[[CoreSample, Optional[np.ndarray]], str],
+        max_frames: Optional[int] = None,
+    ) -> None:
+        """
+        Core mode: bootstrap at the configured Y, park, stream native
+        frames with live J0^2 fits. on_frame returns CORE_CONTINUE /
+        CORE_STOP / CORE_REFIND / CORE_JOG_UP / CORE_JOG_DOWN. Jogs
+        clamp to the machine Y envelope and keep streaming (the servo
+        re-adapts exposure; press f after a big move for a full
+        re-find + recalibration). A ring of lost frames triggers an
+        automatic re-find, and a FAILED re-find (beam blocked) backs
+        off and keeps streaming, as in ring-stream mode.
+        """
+
+        machine_y = self.config.MachineY_mm
+        park = self.bootstrap_core(machine_y)
+        frame_index = 0
+        consecutive_lost = 0
+
+        try:
+            while max_frames is None or frame_index < max_frames:
+                self._begin()
+                sample, frame = self.core_frame(frame_index, machine_y, park)
+                action = on_frame(sample, frame)
+                frame_index += 1
+
+                consecutive_lost = consecutive_lost + 1 if sample.Lost else 0
+
+                if action == CORE_STOP:
+                    break
+
+                if action in (CORE_JOG_UP, CORE_JOG_DOWN):
+                    step = self.config.CoreJogStep_mm
+                    proposed = machine_y + (
+                        step if action == CORE_JOG_UP else -step
+                    )
+                    clamped = min(
+                        max(proposed, self.machine_limits.y_min_mm),
+                        self.machine_limits.y_max_mm,
+                    )
+                    if clamped != proposed:
+                        logger.warning(
+                            f"Jog to Y{proposed:g} clamped to Y{clamped:g} "
+                            "(machine envelope)."
+                        )
+                    machine_y = clamped
+                    logger.info(f"Core mode: jogged to machine Y {machine_y:g} mm.")
+
+                if (
+                    action == CORE_REFIND
+                    or consecutive_lost >= self.config.LostCyclesBeforeRefind
+                ):
+                    if consecutive_lost >= self.config.LostCyclesBeforeRefind:
+                        logger.warning(
+                            f"Core missing from {consecutive_lost} frames — "
+                            "re-running find-beam + calibration."
+                        )
+                    try:
+                        park = self.bootstrap_core(machine_y)
+                        consecutive_lost = 0
+                    except AlignError as ex:
+                        logger.warning(
+                            f"Re-find failed ({ex}); still streaming — "
+                            "press f to retry, or unblock the beam."
+                        )
+                        consecutive_lost = (
+                            -3 * self.config.LostCyclesBeforeRefind
+                        )
+        finally:
+            self._end()
+
+    # -- free-stream mode ----------------------------------------------
+
+    def run_free(
+        self,
+        on_frame: Callable[["FreeSample", Optional[np.ndarray]], str],
+        start_x_mm: Optional[float] = None,
+        start_z_mm: Optional[float] = None,
+        exposure_us: float = 5000.0,
+        auto_exposure: bool = True,
+        max_frames: Optional[int] = None,
+    ) -> None:
+        """
+        Free-stream mode: NO bootstrap, no fitting, no compositing —
+        just move to a start position, stream native frames, and obey
+        jog / step / exposure actions returned by on_frame (see the
+        FREE_* constants and FREE_KEY_ACTIONS). All jogs clamp to the
+        machine envelope. The between-frames exposure servo (halve on
+        saturation, double when dim) runs until an e/E manual nudge or
+        the a toggle switches it off; with no beam in view the servo
+        walks exposure up to the cap, so frames slow down until the
+        beam is found (toggle auto off if that gets in the way).
+        """
+
+        from calibration import robust_max
+
+        limits = self.machine_limits
+
+        def clamp(value: float, lo: float, hi: float, axis: str) -> float:
+            clamped = min(max(value, lo), hi)
+            if clamped != value:
+                logger.warning(
+                    f"{axis}{value:g} clamped to {axis}{clamped:g} "
+                    "(machine envelope)."
+                )
+            return clamped
+
+        x = clamp(
+            start_x_mm
+            if start_x_mm is not None
+            else 0.5 * (limits.x_min_mm + limits.x_max_mm),
+            limits.x_min_mm, limits.x_max_mm, "X",
+        )
+        y = clamp(
+            self.config.MachineY_mm, limits.y_min_mm, limits.y_max_mm, "Y"
+        )
+        z = clamp(
+            start_z_mm
+            if start_z_mm is not None
+            else 0.5 * (limits.z_min_mm + limits.z_max_mm),
+            limits.z_min_mm, limits.z_max_mm, "Z",
+        )
+
+        step = self.config.CoreJogStep_mm
+        exposure_cap = (
+            self.config.MaxExposure_us
+            if self.config.MaxExposure_us is not None
+            else self.config.Saturation.MaxExposure_us
+        )
+        exposure_floor = self.config.Saturation.MinExposure_us
+        self.inner._set_exposure(
+            min(max(exposure_us, exposure_floor), exposure_cap)
+        )
+
+        index = 0
+        try:
+            while max_frames is None or index < max_frames:
+                self._begin()
+                started = time.monotonic()
+
+                frame = self.grab_oriented_native(x, y, z)
+                exposure = float(
+                    self.inner._current_exposure_us or exposure_us
+                )
+
+                peak = 0.0
+                saturated = False
+                if frame is not None:
+                    peak = float(robust_max(frame))
+                    saturated = peak >= self.config.Saturation.SaturationThreshold
+                    if auto_exposure:
+                        self._exposure_servo(peak, lost=False)
+
+                sample = FreeSample(
+                    Index=index,
+                    MachineX_mm=x, MachineY_mm=y, MachineZ_mm=z,
+                    Exposure_us=exposure,
+                    AutoExposure=auto_exposure,
+                    JogStep_mm=step,
+                    Elapsed_s=time.monotonic() - started,
+                    Peak=peak, Saturated=saturated,
+                    NoFrame=frame is None,
+                )
+                action = on_frame(sample, frame)
+                index += 1
+
+                if action == FREE_STOP:
+                    break
+                if action is None or action == FREE_CONTINUE:
+                    continue
+
+                if action.startswith("jog:") and len(action) == 6:
+                    axis, sign = action[4], (1.0 if action[5] == "+" else -1.0)
+                    delta = sign * step
+                    if axis == "x":
+                        x = clamp(x + delta, limits.x_min_mm, limits.x_max_mm, "X")
+                    elif axis == "y":
+                        y = clamp(y + delta, limits.y_min_mm, limits.y_max_mm, "Y")
+                    elif axis == "z":
+                        z = clamp(z + delta, limits.z_min_mm, limits.z_max_mm, "Z")
+                    logger.info(
+                        f"Free mode: jogged to X{x:g} Y{y:g} Z{z:g} "
+                        f"(step {step:g} mm)."
+                    )
+                elif action == FREE_STEP_UP:
+                    step = min(step * 2.0, FREE_JOG_STEP_MAX_MM)
+                    logger.info(f"Free mode: jog step -> {step:g} mm.")
+                elif action == FREE_STEP_DOWN:
+                    step = max(step / 2.0, FREE_JOG_STEP_MIN_MM)
+                    logger.info(f"Free mode: jog step -> {step:g} mm.")
+                elif action in (FREE_EXP_UP, FREE_EXP_DOWN):
+                    auto_exposure = False
+                    factor = 1.5 if action == FREE_EXP_UP else 1.0 / 1.5
+                    new_exposure = min(
+                        max(exposure * factor, exposure_floor), exposure_cap
+                    )
+                    self.inner._set_exposure(new_exposure)
+                    logger.info(
+                        f"Free mode: exposure -> {new_exposure:.0f} us "
+                        "(auto-exposure OFF; press a to re-enable)."
+                    )
+                elif action == FREE_EXP_AUTO:
+                    auto_exposure = not auto_exposure
+                    logger.info(
+                        "Free mode: auto-exposure "
+                        f"{'ON' if auto_exposure else 'OFF'}."
+                    )
+                else:
+                    logger.warning(f"Free mode: unknown action '{action}'.")
+        finally:
+            self._end()
+
     # -- main loop ------------------------------------------------------
 
     def run(
@@ -1709,6 +2035,179 @@ class StreamSample:
 
 
 # Actions an on_frame callback can return to steer the stream loop.
+# Actions a core-mode on_frame callback can return.
+CORE_CONTINUE = "continue"
+CORE_STOP = "stop"
+CORE_REFIND = "refind"        # rerun find-beam + calibration at current Y
+CORE_JOG_UP = "jog:+"         # machine Y + CoreJogStep_mm
+CORE_JOG_DOWN = "jog:-"       # machine Y - CoreJogStep_mm
+
+
+@dataclass(frozen=True)
+class CoreSample:
+    """
+    One parked native-resolution measurement of the axicon-3 Bessel
+    core: X/Z chords through the sub-pixel centroid, azimuthal-mean
+    radial profile, and J0^2 fits — the live version of the core-frame
+    gallery panels. Positions in um about the centroid; rates in
+    counts/us (background-subtracted).
+    """
+
+    Index: int
+    MachineY_mm: float
+    ParkX_mm: float
+    ParkZ_mm: float
+    Exposure_us: float
+    Lost: bool
+    Elapsed_s: float
+    Peak: float = 0.0
+    Saturated: bool = False
+    # Sub-pixel core centroid on the oriented native frame (px).
+    CentroidCol_px: float = 0.0
+    CentroidRow_px: float = 0.0
+    # Profiles: (position_um, rate) pairs; radial position is +r only.
+    XChord: Optional[tuple[np.ndarray, np.ndarray]] = None
+    ZChord: Optional[tuple[np.ndarray, np.ndarray]] = None
+    Radial: Optional[tuple[np.ndarray, np.ndarray]] = None
+    # Fitted k (rad/m) per profile + the radial fit curve and quality.
+    Kx_per_m: Optional[float] = None
+    Kz_per_m: Optional[float] = None
+    Kr_per_m: Optional[float] = None
+    KrStd_per_m: Optional[float] = None
+    FitCurve: Optional[tuple[np.ndarray, np.ndarray]] = None
+    AFit: Optional[float] = None
+    RmsOverA: Optional[float] = None
+    KrIdeal_per_m: float = 0.0
+
+
+def _fit_j0_squared(r_um, rate, kr_seed_per_m):
+    """Fit rate = A*J0(k*r)^2 + C. Returns (k, k_std, A, C) or None."""
+
+    from scipy.optimize import curve_fit
+    from scipy.special import j0 as bessel_j0
+
+    r_m = np.asarray(r_um, dtype=float) * 1e-6
+    y = np.asarray(rate, dtype=float)
+
+    if r_m.size < 10 or not np.isfinite(y).all() or y.max() <= 0:
+        return None
+
+    def model(r, amplitude, k, offset):
+        return amplitude * bessel_j0(k * r) ** 2 + offset
+
+    try:
+        popt, pcov = curve_fit(
+            model,
+            r_m,
+            y,
+            p0=(float(y.max()), kr_seed_per_m, 0.0),
+            bounds=(
+                (0.0, 0.3 * kr_seed_per_m, -np.inf),
+                (np.inf, 3.0 * kr_seed_per_m, np.inf),
+            ),
+            maxfev=2000,
+        )
+    except (RuntimeError, ValueError) as ex:
+        logger.debug(f"J0^2 fit failed: {ex}")
+        return None
+
+    k_std = float(np.sqrt(np.abs(pcov[1][1])))
+    return float(popt[1]), k_std, float(popt[0]), float(popt[2]), model
+
+
+def analyze_core(
+    frame: np.ndarray,
+    exposure_us: float,
+    background_level: float,
+    config: AlignConfig,
+) -> Optional[dict]:
+    """
+    Locate the Bessel core on a NATIVE-resolution oriented frame and
+    extract X/Z chords + azimuthal-mean radial profile (half-pixel
+    bins, per the jul24/jul28 notebooks) with J0^2 fits. None when no
+    core stands above background.
+    """
+
+    from calibration import robust_max
+
+    px_um = config.PixelSize_um
+    peak = robust_max(frame)
+    if peak - background_level < 4.0 * config.SignalMargin_counts:
+        return None
+
+    # Approximate peak: brightest neighbor-supported pixel; refine with
+    # a 7x7 intensity-weighted centroid (as the notebook radial cells).
+    work = frame.astype(np.float32)
+    row, col = np.unravel_index(int(np.argmax(work)), work.shape)
+    r0, r1 = max(row - 3, 0), min(row + 4, work.shape[0])
+    c0, c1 = max(col - 3, 0), min(col + 4, work.shape[1])
+    window = np.clip(work[r0:r1, c0:c1] - background_level, 0.0, None)
+    rr, cc = np.mgrid[r0:r1, c0:c1]
+    weight = window.sum()
+    if weight <= 0:
+        return None
+    cy = float((window * rr).sum() / weight)
+    cx = float((window * cc).sum() / weight)
+
+    crop_px = max(8, int(round(config.CoreCropRadius_um / px_um)))
+    ir, ic = int(round(cy)), int(round(cx))
+    r0, r1 = max(ir - crop_px, 0), min(ir + crop_px + 1, work.shape[0])
+    c0, c1 = max(ic - crop_px, 0), min(ic + crop_px + 1, work.shape[1])
+    crop = (work[r0:r1, c0:c1] - background_level) / max(exposure_us, 1e-9)
+
+    x_um = (np.arange(c0, c1) - cx) * px_um
+    z_um = (np.arange(r0, r1) - cy) * px_um
+    x_chord = crop[min(ir, r1 - 1) - r0, :]
+    z_chord = crop[:, min(ic, c1 - 1) - c0]
+
+    # Radial: azimuthal mean in half-pixel bins.
+    X, Z = np.meshgrid(x_um, z_um)
+    radius_um = np.hypot(X, Z)
+    bins = (radius_um / (px_um / 2.0)).astype(int)
+    n_bins = int(bins.max()) + 1
+    prof = np.bincount(bins.ravel(), weights=crop.ravel(), minlength=n_bins)
+    count = np.bincount(bins.ravel(), minlength=n_bins)
+    keep = count > 0
+    r_bins_um = ((np.arange(n_bins) + 0.5) * px_um / 2.0)[keep]
+    radial = (prof[keep] / count[keep])
+
+    kr_seed = config.CoreKrIdeal_per_m
+    fits = {}
+    for name, (pos, values) in (
+        ("x", (np.abs(x_um), x_chord)),
+        ("z", (np.abs(z_um), z_chord)),
+        ("r", (r_bins_um, radial)),
+    ):
+        fits[name] = _fit_j0_squared(pos, values, kr_seed)
+
+    result = dict(
+        centroid_col=cx, centroid_row=cy, peak=float(peak),
+        saturated=bool(frame.max() >= 255),
+        x_chord=(x_um, x_chord), z_chord=(z_um, z_chord),
+        radial=(r_bins_um, radial),
+        kx=None, kz=None, kr=None, kr_std=None,
+        a_fit=None, rms_over_a=None, fit_curve=None,
+    )
+
+    if fits["x"]:
+        result["kx"] = fits["x"][0]
+    if fits["z"]:
+        result["kz"] = fits["z"][0]
+    if fits["r"]:
+        k, k_std, amplitude, offset, model = fits["r"]
+        result["kr"], result["kr_std"] = k, k_std
+        result["a_fit"] = amplitude
+        r_fine = np.linspace(0.0, r_bins_um.max(), 600)
+        curve = model(r_fine * 1e-6, amplitude, k, offset)
+        result["fit_curve"] = (r_fine, curve)
+        model_at = model(r_bins_um * 1e-6, amplitude, k, offset)
+        result["rms_over_a"] = float(
+            np.sqrt(np.mean((radial - model_at) ** 2)) / max(amplitude, 1e-12)
+        )
+
+    return result
+
+
 STREAM_CONTINUE = "continue"
 STREAM_STOP = "stop"
 STREAM_ORBIT = "orbit"  # run one full patrol lap now
@@ -1756,3 +2255,70 @@ def reference_snapshot_name(
         f"Y{y:g}_X{x:.3f}_Z{z:.3f}" for y, (x, z) in planes
     ]
     return "preview_r=" + "__".join(groups) + ".png"
+
+
+# ---------------------------------------------------------------------------
+# Free-stream mode: live camera + manual X/Y/Z jogging, no compositing
+# ---------------------------------------------------------------------------
+
+# Actions a free-mode on_frame callback can return.
+FREE_CONTINUE = "continue"
+FREE_STOP = "stop"
+FREE_STEP_UP = "step:+"       # double the jog step
+FREE_STEP_DOWN = "step:-"     # halve the jog step
+FREE_EXP_UP = "exp:+"         # exposure x1.5 (switches auto-exposure OFF)
+FREE_EXP_DOWN = "exp:-"       # exposure /1.5 (switches auto-exposure OFF)
+FREE_EXP_AUTO = "exp:auto"    # toggle the auto-exposure servo
+
+FREE_JOG_STEP_MIN_MM = 0.1
+FREE_JOG_STEP_MAX_MM = 100.0
+
+
+def free_jog(axis: str, sign: int) -> str:
+    """Jog action string: axis in {'x','y','z'}, sign +1/-1."""
+
+    return f"jog:{axis}{'+' if sign > 0 else '-'}"
+
+
+# One shared key->action map so the preview window and the raw-terminal
+# reader steer the loop identically. q (quit) and r (snapshot) are NOT
+# actions — the CLI handles them as flags, same as the other modes.
+FREE_KEY_ACTIONS: dict[str, str] = {
+    "left": free_jog("x", -1),
+    "right": free_jog("x", +1),
+    "up": free_jog("z", +1),
+    "down": free_jog("z", -1),
+    ",": free_jog("y", -1),
+    ".": free_jog("y", +1),
+    "<": free_jog("y", -1),
+    ">": free_jog("y", +1),
+    "-": FREE_STEP_DOWN,
+    "=": FREE_STEP_UP,
+    "+": FREE_STEP_UP,
+    "e": FREE_EXP_DOWN,
+    "E": FREE_EXP_UP,
+    "shift+e": FREE_EXP_UP,   # matplotlib reports shift-chords this way
+    "a": FREE_EXP_AUTO,
+}
+
+
+@dataclass(frozen=True)
+class FreeSample:
+    """One free-stream frame: where the gantry is and what it saw."""
+
+    Index: int
+    MachineX_mm: float
+    MachineY_mm: float
+    MachineZ_mm: float
+    Exposure_us: float
+    AutoExposure: bool
+    JogStep_mm: float
+    Elapsed_s: float
+    Peak: float = 0.0
+    Saturated: bool = False
+    NoFrame: bool = False
+
+    def to_jsonable(self) -> dict[str, Any]:
+        from dataclasses import asdict
+
+        return asdict(self)
