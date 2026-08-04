@@ -61,9 +61,20 @@ class DatasetWriterConfig:
     # X horizontal transverse, Y beam propagation, Z vertical.
     GroupByYSubfolder: bool = False
 
+    # Optional label appended to the run directory name after the
+    # timestamp (e.g. the --optic under alignment):
+    # align-2026-08-03_18-51-47_axicon1. Sanitized to filename-safe
+    # characters; empty = no suffix (the historical name).
+    RunSuffix: str = ""
+
     def make_run_dir(self) -> Path:
         now = dt.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-        return self.DatasetRoot / f"{self.JobType}-{now}"
+        name = f"{self.JobType}-{now}"
+        if self.RunSuffix:
+            safe = re.sub(r"[^A-Za-z0-9._-]+", "-", self.RunSuffix).strip("-")
+            if safe:
+                name += f"_{safe}"
+        return self.DatasetRoot / name
 
 
 @dataclass

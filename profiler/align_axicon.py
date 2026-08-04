@@ -768,6 +768,10 @@ class CycleResult:
     Elapsed_s: float
     # Mean radial FWHM of the ring across stations that saw it.
     WidthFWHM_mm: Optional[float] = None
+    # True for LIVE per-station refits emitted mid-lap (fit over the
+    # latest arc from every station visited so far — the fast-feedback
+    # readout); False for the definitive end-of-lap fit.
+    Partial: bool = False
 
     def to_jsonable(self) -> dict[str, Any]:
         def plain(value):
@@ -842,6 +846,12 @@ class AxiconAlignSession:
         # moves; recaptured when the drift exceeds 30%.
         self._background: Optional[dict[str, float]] = None
 
+        # Latest arc per (plane, station): the live per-station refit
+        # pool. Arcs are REPLACED as the lap revisits each station, so
+        # a knob turn propagates into the live fit one station at a
+        # time (full effect after one lap) instead of one LAP at a time.
+        self._live_arcs: dict[tuple[float, int], tuple] = {}
+
         # Planes whose estimate came straight from a chord survey: the
         # FIRST full-lap fit replaces it unclamped (the lap fit is
         # strictly better than the two-column seed, and clamping a
@@ -896,6 +906,13 @@ class AxiconAlignSession:
         """
 
         self._end()  # find_beam/calibrate manage their own acquisition
+
+        # Stale arcs from before the re-find would poison live refits.
+        self._live_arcs = {
+            key: value
+            for key, value in self._live_arcs.items()
+            if key[0] != machine_y_mm
+        }
 
         if not self.inner.find_beam(machine_y_mm):
             raise AlignError(
@@ -1181,6 +1198,11 @@ class AxiconAlignSession:
         index: int,
         machine_y_mm: float,
         on_station: Optional[Callable[[StationSample, np.ndarray], None]] = None,
+        on_live: Optional[
+            Callable[
+                [CycleResult, list[tuple[np.ndarray, float, float]]], None
+            ]
+        ] = None,
     ) -> tuple[CycleResult, list[tuple[np.ndarray, float, float]]]:
         started = time.monotonic()
         self._begin()
@@ -1203,7 +1225,7 @@ class AxiconAlignSession:
             for x, z, reachable in self.fill_positions(estimate)
         ]
 
-        for x_mm, z_mm, reachable, role in stations:
+        for station_i, (x_mm, z_mm, reachable, role) in enumerate(stations):
             if not reachable:
                 samples.append(
                     StationSample(x_mm, z_mm, False, 0.0, Skipped=True, Role=role)
@@ -1237,9 +1259,22 @@ class AxiconAlignSession:
                 all_angles.append(arc.Angles_deg)
                 all_intensities.append(arc.Intensities)
                 all_widths.append(arc.WidthFWHM_mm)
+                self._live_arcs[(machine_y_mm, station_i)] = (
+                    arc.Points_mm,
+                    arc.Angles_deg,
+                    arc.Intensities,
+                    arc.WidthFWHM_mm,
+                )
 
             if on_station is not None:
                 on_station(sample, frame)
+
+            if on_live is not None and role == "ring":
+                live = self._live_refit(
+                    index, machine_y_mm, estimate, samples, started
+                )
+                if live is not None:
+                    on_live(live, list(frames))
 
         skipped = sum(1 for s in samples if s.Skipped)
         if skipped:
@@ -1295,6 +1330,70 @@ class AxiconAlignSession:
             WidthFWHM_mm=float(np.mean(all_widths)) if all_widths else None,
         )
         return result, frames
+
+    def _live_refit(
+        self,
+        index: int,
+        machine_y_mm: float,
+        estimate: RingEstimate,
+        samples: list[StationSample],
+        started: float,
+    ) -> Optional[CycleResult]:
+        """
+        Mid-lap refit over the LATEST arc from every station of this
+        plane (this lap's stations where already visited, last lap's
+        where not) — the fast-feedback readout: metrics move every
+        station (~1-2 s) instead of every lap. A knob turn feeds in one
+        station at a time and is fully absorbed after one lap. Live
+        results are display-only: they never update the ring estimate,
+        the reference, or the exposure servo.
+        """
+
+        arcs = [
+            value
+            for (plane, _), value in self._live_arcs.items()
+            if plane == machine_y_mm
+        ]
+        if not arcs:
+            return None
+
+        points = np.concatenate([a[0] for a in arcs])
+        if points.shape[0] < 3:
+            return None
+
+        circle = fit_circle(points)
+        ellipse = fit_ellipse(points)
+        uniformity = azimuthal_uniformity(
+            np.concatenate([a[1] for a in arcs]),
+            np.concatenate([a[2] for a in arcs]),
+        )
+
+        reference = self.references.get(machine_y_mm)
+        offset = None
+        if circle is not None and reference is not None:
+            offset = (
+                circle.CenterX_mm - reference[0],
+                circle.CenterZ_mm - reference[1],
+            )
+
+        return CycleResult(
+            Index=index,
+            MachineY_mm=machine_y_mm,
+            Estimate=estimate,
+            Circle=circle,
+            Ellipse=ellipse,
+            Uniformity=uniformity,
+            Reference=reference,
+            Offset_mm=offset,
+            Tilt=self._tilt_metrics(),
+            Stations=list(samples),
+            Points_mm=points,
+            Exposure_us=self.inner._current_exposure_us,
+            Lost=circle is None,
+            Elapsed_s=time.monotonic() - started,
+            WidthFWHM_mm=float(np.mean([a[3] for a in arcs])),
+            Partial=True,
+        )
 
     def _update_estimate(
         self, machine_y_mm: float, circle: Optional[CircleFit]
@@ -1812,6 +1911,170 @@ class AxiconAlignSession:
         finally:
             self._end()
 
+    # -- gaussian input mode -------------------------------------------
+
+    def _mosaic_offsets(self, n: int) -> list[tuple[float, float]]:
+        """
+        n x n grid of (dx, dz) offsets about the mosaic center, spaced
+        at 0.7 of the frame size (30% overlap): a 2x2 mosaic covers
+        ~12 x 9 mm — enough for the 9.5 mm 1/e^2 input beam whose tails
+        a single 7.1 x 5.3 mm frame clips (clipped tails bias Gaussian
+        width fits low).
+        """
+
+        if n <= 1:
+            return [(0.0, 0.0)]
+
+        rows, cols = self._frame_shape_hint()
+        mm = self.config.mm_per_px()
+        spacing_x = 0.7 * cols * mm
+        spacing_z = 0.7 * rows * mm
+        return [
+            (spacing_x * (i - (n - 1) / 2.0), spacing_z * (j - (n - 1) / 2.0))
+            for j in range(n)
+            for i in range(n)
+        ]
+
+    def gaussian_plane(
+        self,
+        index: int,
+        pass_no: int,
+        machine_y_mm: float,
+        center_xz: tuple[float, float],
+        mosaic_n: int,
+    ) -> tuple[
+        GaussianPlaneSample,
+        Optional[np.ndarray],
+        Optional[tuple[float, float, float, float]],
+    ]:
+        """One ladder plane: mosaic about center_xz -> stitch -> fit."""
+
+        from calibration import robust_max
+
+        started = time.monotonic()
+        cx, cz = center_xz
+        limits = self.machine_limits
+
+        frames: list[tuple[np.ndarray, float, float]] = []
+        peak = 0.0
+        for dx, dz in self._mosaic_offsets(mosaic_n):
+            x = min(max(cx + dx, limits.x_min_mm), limits.x_max_mm)
+            z = min(max(cz + dz, limits.z_min_mm), limits.z_max_mm)
+            native = self.grab_oriented_native(x, machine_y_mm, z)
+            if native is None:
+                continue
+            peak = max(peak, float(robust_max(native)))
+            frames.append((mean_pool(native, self.config.Downsample), x, z))
+
+        exposure = float(self.inner._current_exposure_us or 0.0)
+        background = self.background_level() or 0.0
+        composed = compose_canvas(frames, self.config.mm_per_px())
+
+        fit = None
+        canvas = extent = None
+        if composed is not None:
+            canvas, extent = composed
+            fit = fit_gaussian_2d(canvas, extent, self.config, background)
+
+        self._exposure_servo(peak, lost=fit is None)
+
+        sample = GaussianPlaneSample(
+            Index=index, Pass=pass_no, MachineY_mm=machine_y_mm,
+            Exposure_us=exposure, Lost=fit is None,
+            Elapsed_s=time.monotonic() - started,
+            Peak=peak,
+            Saturated=peak >= self.config.Saturation.SaturationThreshold,
+            Fit=fit,
+        )
+        return sample, canvas, extent
+
+    def run_gaussian(
+        self,
+        on_plane: Callable[..., str],
+        y_values: list[float],
+        mosaic_n: int = 2,
+        max_passes: Optional[int] = None,
+    ) -> None:
+        """
+        Gaussian input mode (protocol stage 1): repeatedly walk a
+        machine-Y ladder; at each plane grab an n x n mosaic, stitch,
+        fit a rotated 2D Gaussian, and refresh the centroid-vs-Y line
+        fits (LadderFit — the pointing/straightness readout). Passes
+        repeat until GAUSS_STOP / max_passes, so it doubles as the
+        interactive steer-the-mirrors loop. on_plane(sample, canvas,
+        extent) returns GAUSS_CONTINUE / GAUSS_STOP / GAUSS_REFIND.
+        """
+
+        if not y_values:
+            raise AlignError("Gaussian mode needs at least one Y plane.")
+
+        current = self.bootstrap_core(y_values[0])
+        centers: dict[float, tuple[float, float]] = {}
+        index = 0
+        pass_no = 0
+        consecutive_lost = 0
+        stop = False
+
+        try:
+            while not stop and (max_passes is None or pass_no < max_passes):
+                pass_no += 1
+                for y in y_values:
+                    self._begin()
+                    seed = centers.get(y, current)
+                    sample, canvas, extent = self.gaussian_plane(
+                        index, pass_no, y, seed, mosaic_n
+                    )
+
+                    if sample.Fit is not None:
+                        centers[y] = (
+                            sample.Fit.CenterX_mm, sample.Fit.CenterZ_mm
+                        )
+                        current = centers[y]
+                        consecutive_lost = 0
+                    else:
+                        consecutive_lost += 1
+
+                    from dataclasses import replace as dataclass_replace
+
+                    sample = dataclass_replace(
+                        sample,
+                        Ladder=fit_ladder(
+                            centers, self.config.BeamDirectionSign
+                        ),
+                    )
+                    action = on_plane(sample, canvas, extent)
+                    index += 1
+
+                    if action == GAUSS_STOP:
+                        stop = True
+                        break
+
+                    if (
+                        action == GAUSS_REFIND
+                        or consecutive_lost
+                        >= self.config.LostCyclesBeforeRefind
+                    ):
+                        if (consecutive_lost
+                                >= self.config.LostCyclesBeforeRefind):
+                            logger.warning(
+                                f"Beam missing from {consecutive_lost} "
+                                "planes — re-running find-beam + "
+                                "calibration."
+                            )
+                        try:
+                            current = self.bootstrap_core(y)
+                            consecutive_lost = 0
+                        except AlignError as ex:
+                            logger.warning(
+                                f"Re-find failed ({ex}); still walking "
+                                "the ladder — press f to retry."
+                            )
+                            consecutive_lost = (
+                                -3 * self.config.LostCyclesBeforeRefind
+                            )
+        finally:
+            self._end()
+
     # -- free-stream mode ----------------------------------------------
 
     def run_free(
@@ -1962,10 +2225,17 @@ class AxiconAlignSession:
         ],
         max_cycles: Optional[int] = None,
         on_station: Optional[Callable[[StationSample, np.ndarray], None]] = None,
+        on_live: Optional[
+            Callable[
+                [CycleResult, list[tuple[np.ndarray, float, float]]], None
+            ]
+        ] = None,
     ) -> list[CycleResult]:
         """
         Patrol until on_cycle returns False (or max_cycles). on_cycle
         gets each CycleResult plus that cycle's frames for the preview.
+        on_live (optional) additionally gets a Partial CycleResult after
+        EVERY ring station — the per-station fast-feedback refit.
         """
 
         results: list[CycleResult] = []
@@ -1980,7 +2250,7 @@ class AxiconAlignSession:
                     self.bootstrap(machine_y)
 
                 result, frames = self.run_cycle(
-                    index, machine_y, on_station=on_station
+                    index, machine_y, on_station=on_station, on_live=on_live
                 )
                 results.append(result)
 
@@ -2322,3 +2592,199 @@ class FreeSample:
         from dataclasses import asdict
 
         return asdict(self)
+
+
+# ---------------------------------------------------------------------------
+# Gaussian input mode: 2D Gaussian fits on a machine-Y ladder -> pointing
+# ---------------------------------------------------------------------------
+
+# Actions a gaussian-mode on_plane callback can return.
+GAUSS_CONTINUE = "continue"
+GAUSS_STOP = "stop"
+GAUSS_REFIND = "refind"      # rerun find-beam + calibration here
+
+
+@dataclass(frozen=True)
+class GaussianFit:
+    """One plane's 2D elliptical-Gaussian fit (machine mm)."""
+
+    CenterX_mm: float
+    CenterZ_mm: float
+    # 1/e^2 intensity RADII along the principal axes (w = 2 sigma).
+    WMajor_mm: float
+    WMinor_mm: float
+    Theta_deg: float          # major axis vs +X, CCW, (-90, 90]
+    Amplitude: float          # counts above Offset at the center
+    Offset: float
+    RmsOverA: float
+
+
+@dataclass(frozen=True)
+class LadderFit:
+    """
+    Line fits of the fitted beam center vs machine Y over the ladder:
+    the beam-straightness readout. Slopes are quoted ALONG THE BEAM
+    (multiplied by BeamDirectionSign), so positive SlopeX means the
+    beam walks toward +X as it propagates downstream. Residuals are
+    the rms of the line fits — rail wiggle + fit noise, NOT tilt.
+    """
+
+    SlopeX_mrad: float
+    SlopeZ_mrad: float
+    ResidualX_mm: float
+    ResidualZ_mm: float
+    Planes: int
+
+
+@dataclass(frozen=True)
+class GaussianPlaneSample:
+    """One ladder plane: mosaic -> stitched canvas -> 2D Gaussian."""
+
+    Index: int
+    Pass: int
+    MachineY_mm: float
+    Exposure_us: float
+    Lost: bool
+    Elapsed_s: float
+    Peak: float = 0.0
+    Saturated: bool = False
+    Fit: Optional[GaussianFit] = None
+    Ladder: Optional[LadderFit] = None
+
+    def to_jsonable(self) -> dict[str, Any]:
+        from dataclasses import asdict
+
+        return asdict(self)
+
+
+def fit_gaussian_2d(
+    canvas: np.ndarray,
+    extent: tuple[float, float, float, float],
+    config: AlignConfig,
+    background_level: float = 0.0,
+) -> Optional[GaussianFit]:
+    """
+    Rotated elliptical 2D Gaussian fit on a stitched canvas (NaN =
+    un-imaged, excluded). Model: A exp(-2 (u^2/wu^2 + v^2/wv^2)) + C
+    with (u, v) the principal frame — w are 1/e^2 intensity radii.
+    None when the fit is impossible or nothing stands above background.
+    """
+
+    from scipy.optimize import curve_fit
+
+    mm = config.mm_per_px()
+    rows, cols = canvas.shape
+    x_axis = extent[0] + (np.arange(cols) + 0.5) * mm
+    z_axis = extent[3] - (np.arange(rows) + 0.5) * mm
+    X, Z = np.meshgrid(x_axis, z_axis)
+
+    mask = np.isfinite(canvas)
+    if int(mask.sum()) < 50:
+        return None
+
+    xs = X[mask].astype(float)
+    zs = Z[mask].astype(float)
+    values = canvas[mask].astype(float)
+
+    peak = float(values.max())
+    if peak - background_level < 4.0 * config.SignalMargin_counts:
+        return None
+
+    # Subsample for fit speed (a full 2x2 mosaic is ~150k pixels).
+    if xs.size > 20_000:
+        stride = xs.size // 20_000 + 1
+        xs, zs, values = xs[::stride], zs[::stride], values[::stride]
+
+    # Moment seeds (median-referenced so background doesn't drag them).
+    baseline = float(np.median(values))
+    weights = np.clip(values - baseline, 0.0, None)
+    if weights.sum() <= 0:
+        return None
+    cx0 = float((xs * weights).sum() / weights.sum())
+    cz0 = float((zs * weights).sum() / weights.sum())
+    var_x = float(((xs - cx0) ** 2 * weights).sum() / weights.sum())
+    var_z = float(((zs - cz0) ** 2 * weights).sum() / weights.sum())
+    w_seed_x = max(2.0 * math.sqrt(max(var_x, 0.0)), 3.0 * mm)
+    w_seed_z = max(2.0 * math.sqrt(max(var_z, 0.0)), 3.0 * mm)
+
+    span = max(extent[1] - extent[0], extent[3] - extent[2])
+
+    def model(coords, amplitude, cx, cz, wu, wv, theta, offset):
+        x, z = coords
+        dx, dz = x - cx, z - cz
+        u = dx * np.cos(theta) + dz * np.sin(theta)
+        v = -dx * np.sin(theta) + dz * np.cos(theta)
+        return amplitude * np.exp(
+            -2.0 * (u ** 2 / wu ** 2 + v ** 2 / wv ** 2)
+        ) + offset
+
+    try:
+        popt, _ = curve_fit(
+            model,
+            (xs, zs),
+            values,
+            p0=(peak - baseline, cx0, cz0, w_seed_x, w_seed_z, 0.0, baseline),
+            bounds=(
+                (0.0, extent[0] - span, extent[2] - span,
+                 mm, mm, -np.pi / 2, -np.inf),
+                (np.inf, extent[1] + span, extent[3] + span,
+                 10.0 * span, 10.0 * span, np.pi / 2, np.inf),
+            ),
+            maxfev=5000,
+        )
+    except (RuntimeError, ValueError) as ex:
+        logger.debug(f"2D Gaussian fit failed: {ex}")
+        return None
+
+    amplitude, cx, cz, wu, wv, theta, offset = popt
+    if amplitude <= 0:
+        return None
+
+    residual = values - model((xs, zs), *popt)
+    rms_over_a = float(np.sqrt(np.mean(residual ** 2)) / amplitude)
+
+    # Normalize: WMajor >= WMinor, Theta = major axis vs +X in (-90, 90].
+    if wv > wu:
+        wu, wv = wv, wu
+        theta += np.pi / 2
+    theta_deg = math.degrees(
+        (theta + np.pi / 2) % np.pi - np.pi / 2
+    )
+    if theta_deg <= -90.0:
+        theta_deg += 180.0
+
+    return GaussianFit(
+        CenterX_mm=float(cx), CenterZ_mm=float(cz),
+        WMajor_mm=float(wu), WMinor_mm=float(wv),
+        Theta_deg=float(theta_deg),
+        Amplitude=float(amplitude), Offset=float(offset),
+        RmsOverA=rms_over_a,
+    )
+
+
+def fit_ladder(
+    centers: dict[float, tuple[float, float]], beam_direction_sign: int
+) -> Optional[LadderFit]:
+    """
+    Line fits of fitted centers vs machine Y (needs >= 2 planes).
+    Slopes are converted to the BEAM frame with beam_direction_sign,
+    so they read as walk-off per unit distance downstream.
+    """
+
+    if len(centers) < 2:
+        return None
+
+    ys = np.array(sorted(centers), dtype=float)
+    cx = np.array([centers[y][0] for y in ys])
+    cz = np.array([centers[y][1] for y in ys])
+
+    px = np.polyfit(ys, cx, 1)
+    pz = np.polyfit(ys, cz, 1)
+
+    return LadderFit(
+        SlopeX_mrad=float(beam_direction_sign * px[0] * 1000.0),
+        SlopeZ_mrad=float(beam_direction_sign * pz[0] * 1000.0),
+        ResidualX_mm=float(np.sqrt(np.mean((cx - np.polyval(px, ys)) ** 2))),
+        ResidualZ_mm=float(np.sqrt(np.mean((cz - np.polyval(pz, ys)) ** 2))),
+        Planes=len(centers),
+    )

@@ -1145,3 +1145,186 @@ def test_free_preview_renders_saves_and_queues_key_actions(
         assert preview.pop_action() is None
     finally:
         preview.close()
+
+
+# ---------------------------------------------------------------------------
+# Gaussian input mode (protocol stage 1)
+# ---------------------------------------------------------------------------
+
+
+class GaussianScene:
+    """Rotated elliptical Gaussian beam; center can drift along Y."""
+
+    def __init__(self, center_fn=None, w_major=4.0, w_minor=3.2,
+                 theta_deg=20.0, amplitude=180.0, background=4.0,
+                 reference_exposure_us=10_000.0):
+        self.center_fn = center_fn or (lambda y: (60.0, -60.0))
+        self.w_major = w_major
+        self.w_minor = w_minor
+        self.theta = math.radians(theta_deg)
+        self.amplitude = amplitude
+        self.background = background
+        self.reference_exposure_us = reference_exposure_us
+
+    def render(self, x_c, z_c, machine_y, exposure_us):
+        mm_per_px = PIXEL_UM / 1000.0
+        width_mm = SENSOR_COLS * mm_per_px
+        height_mm = SENSOR_ROWS * mm_per_px
+
+        x = x_c - width_mm / 2.0 + (np.arange(SENSOR_COLS) + 0.5) * mm_per_px
+        z = z_c + height_mm / 2.0 - (np.arange(SENSOR_ROWS) + 0.5) * mm_per_px
+        X, Z = np.meshgrid(x, z)
+
+        cx, cz = self.center_fn(machine_y)
+        dx, dz = X - cx, Z - cz
+        u = dx * math.cos(self.theta) + dz * math.sin(self.theta)
+        v = -dx * math.sin(self.theta) + dz * math.cos(self.theta)
+        intensity = self.amplitude * np.exp(
+            -2.0 * (u ** 2 / self.w_major ** 2 + v ** 2 / self.w_minor ** 2)
+        )
+
+        counts = self.background + intensity * (
+            exposure_us / self.reference_exposure_us
+        )
+        machine_frame = np.clip(counts, 0, 255).astype(np.uint8)
+        return machine_frame[::-1, ::-1]  # raw = machine view rot 180
+
+
+def test_fit_gaussian_2d_recovers_center_widths_and_angle(modules):
+    scene = GaussianScene()
+    machine_view = scene.render(60.0, -60.0, 20.0, 10_000.0)[::-1, ::-1]
+    config = align_config(modules)
+
+    pooled = modules.align.mean_pool(machine_view, config.Downsample)
+    extent = (60.0 - 6.4, 60.0 + 6.4, -60.0 - 4.8, -60.0 + 4.8)
+
+    fit = modules.align.fit_gaussian_2d(pooled, extent, config)
+
+    assert fit is not None
+    assert fit.CenterX_mm == pytest.approx(60.0, abs=0.1)
+    assert fit.CenterZ_mm == pytest.approx(-60.0, abs=0.1)
+    assert fit.WMajor_mm == pytest.approx(4.0, rel=0.05)
+    assert fit.WMinor_mm == pytest.approx(3.2, rel=0.05)
+    assert fit.Theta_deg == pytest.approx(20.0, abs=4.0)
+    assert fit.RmsOverA < 0.05
+
+
+def test_run_gaussian_ladder_measures_pointing_slope(modules, tmp_path):
+    # 5 mrad walk in X, -3 mrad in Z per machine-Y mm (machine frame);
+    # BeamDirectionSign -1 flips them into the beam frame.
+    scene = GaussianScene(
+        center_fn=lambda y: (
+            60.0 + 0.005 * (y - 70.0),
+            -60.0 - 0.003 * (y - 70.0),
+        )
+    )
+    session, writer, _ = make_session(modules, tmp_path, scene=scene)
+
+    samples = []
+
+    def on_plane(sample, canvas, extent):
+        samples.append(sample)
+        return modules.align.GAUSS_CONTINUE
+
+    session.run_gaussian(
+        on_plane, [130.0, 70.0, 10.0], mosaic_n=2, max_passes=2
+    )
+
+    assert len(samples) == 6
+    assert not any(s.Lost for s in samples)
+    assert all(s.Fit is not None for s in samples)
+
+    # Widths recovered at every plane despite the mosaic stitching.
+    for s in samples:
+        assert s.Fit.WMajor_mm == pytest.approx(4.0, rel=0.07)
+        assert s.Fit.WMinor_mm == pytest.approx(3.2, rel=0.07)
+
+    # Ladder slopes: machine +5/-3 mrad -> beam frame (sign -1) -5/+3.
+    ladder = samples[-1].Ladder
+    assert ladder is not None and ladder.Planes == 3
+    assert ladder.SlopeX_mrad == pytest.approx(-5.0, abs=0.4)
+    assert ladder.SlopeZ_mrad == pytest.approx(+3.0, abs=0.4)
+    assert ladder.ResidualX_mm < 0.1
+    assert ladder.ResidualZ_mm < 0.1
+
+
+def test_gaussian_preview_renders_and_saves_headless(modules, tmp_path):
+    session, writer, _ = make_session(
+        modules, tmp_path, scene=GaussianScene()
+    )
+    preview = modules.preview.GaussianPreview(
+        align_config(modules), display=False
+    )
+
+    def on_plane(sample, canvas, extent):
+        preview.update_plane(sample, canvas, extent)
+        return modules.align.GAUSS_CONTINUE
+
+    try:
+        session.run_gaussian(
+            on_plane, [40.0, 20.0], mosaic_n=2, max_passes=1
+        )
+        assert preview.save_png(tmp_path / "gauss.png") is not None
+        assert (tmp_path / "gauss.png").stat().st_size > 0
+        assert len(preview.history) == 2
+    finally:
+        preview.close()
+
+
+def test_kr_percent_label_flags_railed_fits(modules):
+    ideal = 38_700.0
+    assert "RAILED" in modules.preview.kr_percent_label(3.0 * ideal, ideal)
+    assert "RAILED" in modules.preview.kr_percent_label(0.3 * ideal, ideal)
+    assert "RAILED" not in modules.preview.kr_percent_label(
+        1.05 * ideal, ideal
+    )
+    assert modules.preview.kr_percent_label(None, ideal) == "—"
+
+
+# ---------------------------------------------------------------------------
+# Per-station live refits (fast feedback)
+# ---------------------------------------------------------------------------
+
+
+def test_patrol_live_refit_updates_every_station(modules, tmp_path):
+    session, writer, scene = make_session(modules, tmp_path)
+
+    live_results = []
+    cycle_results = []
+
+    def on_live(result, frames):
+        live_results.append(result)
+        assert result.Partial
+        assert frames  # frames-so-far accompany every live refit
+
+    def on_cycle(result, frames):
+        cycle_results.append(result)
+        assert not result.Partial
+        return len(cycle_results) < 2
+
+    session.run(on_cycle, max_cycles=2, on_live=on_live)
+
+    # One live refit per successful ring station, both laps.
+    ring_hits = sum(
+        sum(1 for s in r.Stations if s.HasSignal and s.Role == "ring")
+        for r in cycle_results
+    )
+    assert len(live_results) == ring_hits
+    assert ring_hits >= 12  # 8 stations x 2 laps, minus any misses
+
+    # By the end of lap 2 the live fit has the full ring: it agrees
+    # with the definitive lap fit.
+    final_live = live_results[-1]
+    final_cycle = cycle_results[-1]
+    assert final_live.Circle is not None
+    assert final_live.Circle.CenterX_mm == pytest.approx(
+        final_cycle.Circle.CenterX_mm, abs=0.2
+    )
+    assert final_live.Circle.CenterZ_mm == pytest.approx(
+        final_cycle.Circle.CenterZ_mm, abs=0.2
+    )
+    assert final_live.Uniformity is not None
+
+    # Early refits (first lap, partial coverage) already produce a fit
+    # once 3+ stations are in.
+    assert live_results[2].Circle is not None

@@ -270,6 +270,30 @@ class AlignPreview:
         self.figure.canvas.draw_idle()
         self._pump()
 
+    def update_live(
+        self,
+        result: CycleResult,
+        frames: list[tuple[np.ndarray, float, float]],
+    ) -> None:
+        """
+        Per-station LIVE refit redraw (Partial results): ring + metrics
+        refresh every station so knob turns show up in ~1-2 s; the
+        history strip only advances on definitive end-of-lap fits.
+        """
+
+        self._draw_ring(result, frames)
+        self._draw_metrics(result)
+
+        stations_in = sum(1 for s in result.Stations if s.HasSignal)
+        self._status.set_text(
+            f"Axicon alignment — cycle {result.Index} @ machine Y "
+            f"{result.MachineY_mm:g} mm: LIVE fit, {stations_in} stations "
+            f"in ({result.Elapsed_s:.1f} s into lap)   "
+            "[r = set reference, q = quit]"
+        )
+        self.figure.canvas.draw_idle()
+        self._pump()
+
     def _draw_ring(self, result: CycleResult, frames) -> None:
         ax = self.ax_ring
         ax.clear()
@@ -601,10 +625,7 @@ class CorePreview:
             ideal = sample.KrIdeal_per_m
 
             def pct(k):
-                return (
-                    f"{(k / ideal - 1) * 100:+.1f}%"
-                    if (k and ideal) else "—"
-                )
+                return kr_percent_label(k, ideal)
 
             title = (
                 f"kx {pct(sample.Kx_per_m)}, kz {pct(sample.Kz_per_m)}, "
@@ -775,6 +796,201 @@ class FreePreview:
             return str(path)
         except Exception as ex:  # noqa: BLE001 - snapshot is best-effort
             logger.warning(f"Could not save the free-stream snapshot: {ex}")
+            return None
+
+    def close(self) -> None:
+        self.plt.close(self.figure)
+
+
+def kr_percent_label(k, ideal) -> str:
+    """
+    'kr vs ideal' label for core mode. The J0^2 fit bounds k to
+    0.3-3x the ideal seed, so a value AT a bound is a railed fit, not
+    a measurement (hardware lesson 2026-08-03: a plane outside the
+    Bessel zone read exactly +200.0% on all three fits — the 3x
+    bound). Flag it so the display can't quietly lie.
+    """
+
+    if not (k and ideal):
+        return "—"
+    ratio = k / ideal
+    label = f"{(ratio - 1) * 100:+.1f}%"
+    if ratio >= 2.95 or ratio <= 0.305:
+        label += " [FIT RAILED]"
+    return label
+
+
+class GaussianPreview:
+    """
+    Gaussian-input-mode window (protocol stage 1): stitched mosaic
+    with the fitted 1/e^2 ellipse, plus centroid-vs-Y and width-vs-Y
+    ladder plots with live pointing-slope line fits.
+
+    Keys:  r    save a snapshot (figure PNG + stitched canvas .npy)
+           f    re-run find-beam + exposure calibration here
+           q    quit (closing the window also quits)
+    """
+
+    def __init__(self, config: AlignConfig, display: bool = True):
+        import matplotlib
+
+        if not display:
+            matplotlib.use("Agg")
+
+        import matplotlib.pyplot as plt
+
+        self.plt = plt
+        self.config = config
+        self.display = display
+        self.quit_requested = False
+        self.save_requested = False
+        self.refind_requested = False
+
+        # Latest fit per Y plane: y -> (cx, cz, wmajor, wminor).
+        self.history: dict[float, tuple[float, float, float, float]] = {}
+
+        if display:
+            plt.ion()
+
+        self.figure = plt.figure("Gaussian input beam", figsize=(12.5, 6.4))
+        grid = self.figure.add_gridspec(2, 2, width_ratios=[1.15, 1.0])
+        self.ax_image = self.figure.add_subplot(grid[:, 0])
+        self.ax_centroid = self.figure.add_subplot(grid[0, 1])
+        self.ax_width = self.figure.add_subplot(grid[1, 1])
+
+        self.figure.canvas.mpl_connect("key_press_event", self._on_key)
+        self.figure.canvas.mpl_connect("close_event", self._on_close)
+
+        self._status = self.figure.suptitle(
+            "Gaussian input — bootstrapping (find-beam sweep)...",
+            fontsize=11,
+        )
+
+    def _on_key(self, event) -> None:
+        if event.key == "q":
+            self.quit_requested = True
+        elif event.key == "r":
+            self.save_requested = True
+        elif event.key == "f":
+            self.refind_requested = True
+
+    def _on_close(self, _event) -> None:
+        self.quit_requested = True
+
+    def _pump(self) -> None:
+        if self.display:
+            self.plt.pause(0.001)
+
+    def update_plane(self, sample, canvas, extent) -> None:
+        import numpy as np
+
+        fit = sample.Fit
+        if fit is not None:
+            self.history[sample.MachineY_mm] = (
+                fit.CenterX_mm, fit.CenterZ_mm,
+                fit.WMajor_mm, fit.WMinor_mm,
+            )
+
+        # -- stitched mosaic + fitted ellipse --------------------------
+        ax = self.ax_image
+        ax.clear()
+        if canvas is not None:
+            cmap = self.plt.get_cmap("inferno").copy()
+            cmap.set_bad("0.35")
+            ax.imshow(
+                canvas, extent=extent, cmap=cmap, origin="upper",
+                vmin=0.0,
+                vmax=max(float(np.nanmax(canvas)), 1.0),
+            )
+            if fit is not None:
+                phi = np.linspace(0.0, 2.0 * np.pi, 120)
+                t = np.radians(fit.Theta_deg)
+                ex = (fit.WMajor_mm * np.cos(phi) * np.cos(t)
+                      - fit.WMinor_mm * np.sin(phi) * np.sin(t))
+                ez = (fit.WMajor_mm * np.cos(phi) * np.sin(t)
+                      + fit.WMinor_mm * np.sin(phi) * np.cos(t))
+                ax.plot(fit.CenterX_mm + ex, fit.CenterZ_mm + ez,
+                        "-", color="cyan", lw=1.2)
+                ax.plot(fit.CenterX_mm, fit.CenterZ_mm, "+",
+                        color="cyan", ms=10)
+            ax.set_xlabel("machine X (mm)")
+            ax.set_ylabel("machine Z (mm)")
+            title = f"Y {sample.MachineY_mm:g} mm"
+            if fit is not None:
+                title += (
+                    f" — w {fit.WMajor_mm:.2f} x {fit.WMinor_mm:.2f} mm "
+                    f"@ {fit.Theta_deg:+.0f} deg, "
+                    f"rms/A {fit.RmsOverA:.3f}"
+                )
+            else:
+                title += " — NO FIT"
+            if sample.Saturated:
+                title += "  [SATURATED]"
+            ax.set_title(title, fontsize=9)
+        else:
+            ax.text(0.5, 0.5, "no frames", ha="center", va="center",
+                    transform=ax.transAxes)
+            ax.set_xticks([]), ax.set_yticks([])
+
+        # -- centroid vs Y (straightness) ------------------------------
+        ax = self.ax_centroid
+        ax.clear()
+        if self.history:
+            ys = np.array(sorted(self.history))
+            cx = np.array([self.history[y][0] for y in ys])
+            cz = np.array([self.history[y][1] for y in ys])
+            ax.plot(ys, cx, "o-", color="tab:blue", ms=4, label="center X")
+            ax.plot(ys, cz, "o-", color="tab:green", ms=4, label="center Z")
+            if ys.size >= 2:
+                fx = np.poly1d(np.polyfit(ys, cx, 1))
+                fz = np.poly1d(np.polyfit(ys, cz, 1))
+                ax.plot(ys, fx(ys), "--", color="tab:blue", lw=1, alpha=0.6)
+                ax.plot(ys, fz(ys), "--", color="tab:green", lw=1, alpha=0.6)
+            ax.legend(fontsize=8, loc="best")
+        ladder = sample.Ladder
+        if ladder is not None:
+            ax.set_title(
+                f"slope X {ladder.SlopeX_mrad:+.2f}, "
+                f"Z {ladder.SlopeZ_mrad:+.2f} mrad (downstream); "
+                f"resid {ladder.ResidualX_mm:.3f}/"
+                f"{ladder.ResidualZ_mm:.3f} mm",
+                fontsize=9,
+            )
+        else:
+            ax.set_title("centroid vs Y — needs 2+ planes", fontsize=9)
+        ax.set_ylabel("center (mm)")
+        ax.grid(alpha=0.3)
+
+        # -- widths vs Y (divergence / astigmatism) --------------------
+        ax = self.ax_width
+        ax.clear()
+        if self.history:
+            ys = np.array(sorted(self.history))
+            wmaj = np.array([self.history[y][2] for y in ys])
+            wmin = np.array([self.history[y][3] for y in ys])
+            ax.plot(ys, wmaj, "o-", color="tab:red", ms=4, label="w major")
+            ax.plot(ys, wmin, "o-", color="tab:orange", ms=4, label="w minor")
+            ax.legend(fontsize=8, loc="best")
+        ax.set_xlabel("machine Y (mm)")
+        ax.set_ylabel("1/e$^2$ radius (mm)")
+        ax.grid(alpha=0.3)
+
+        self._status.set_text(
+            f"Gaussian input — pass {sample.Pass}, "
+            f"plane Y {sample.MachineY_mm:g} mm, "
+            f"T {sample.Exposure_us:.0f} us, "
+            f"{sample.Elapsed_s:.1f} s/plane   "
+            "[r = save, f = re-find, q = quit]"
+        )
+        self.figure.canvas.draw_idle()
+        self._pump()
+
+    def save_png(self, path) -> Optional[str]:
+        try:
+            self.figure.savefig(path, dpi=110, facecolor="white")
+            return str(path)
+        except Exception as ex:  # noqa: BLE001 - snapshot is best-effort
+            logger.warning(f"Could not save the gaussian snapshot: {ex}")
             return None
 
     def close(self) -> None:

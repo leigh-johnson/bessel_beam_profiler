@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 # -- connection -------------------------------------------------------------
 @click.option("--host", default="fluidnc-sr2.local", show_default=True, help="FluidNC hostname or IP.")
 @click.option("--port", default=23, show_default=True, type=int)
-@click.option("--feed", default=400.0, show_default=True, type=float, help="Feed rate for patrol moves, mm/min.")
+@click.option("--feed", default=1500.0, show_default=True, type=float, help="Feed rate for patrol moves, mm/min. Safe to raise: FluidNC clamps every move to the firmware's per-axis max_rate, so a big value just means 'as fast as the machine is tuned for'. Raised from the original 400 default 2026-08-04 — motion dominates lap time.")
 @click.option(
     "--soft-limit-margin",
     default=1.0,
@@ -107,7 +107,7 @@ logger = logging.getLogger(__name__)
 @click.option(
     "--mode",
     default=None,
-    type=click.Choice(["stream", "patrol", "core", "free"]),
+    type=click.Choice(["stream", "patrol", "core", "free", "gaussian"]),
     help="stream: find the ring, orbit it once, then PARK and stream "
     "single frames at a few Hz (center drift + ring width live; press o "
     "for a fresh orbit lap, f to re-find). patrol: orbit continuously, "
@@ -117,7 +117,11 @@ logger = logging.getLogger(__name__)
     "fits; r saves a snapshot, up/down arrows jog Y. free: NO bootstrap, "
     "no fitting, no compositing — live camera view with X/Y/Z jogging "
     "from the keyboard (preview window OR the launching terminal). "
-    "Default: core when --optic is axicon3, stream otherwise.",
+    "gaussian: protocol stage 1 — walk a machine-Y ladder (--y down to "
+    "--y-stop, --planes planes), mosaic + 2D-Gaussian fit each plane, "
+    "live centroid-vs-Y pointing slope in mrad (the input-beam "
+    "straightness readout). Default: core when --optic is axicon3, "
+    "stream otherwise.",
 )
 @click.option("--park-azimuth", default=None, type=float, help="Stream mode: ring azimuth (deg, 0=+X, 90=+Z/up) to park at. Default: the brightest station of the last orbit.")
 @click.option("--orbit-every", default=0.0, show_default=True, type=click.FloatRange(min=0.0), help="Stream mode: also run a full orbit lap every N seconds (0 = only on demand via o).")
@@ -132,6 +136,10 @@ logger = logging.getLogger(__name__)
 @click.option("--x", "start_x", default=None, type=float, help="Free mode: starting machine X (mm). Default: center of the X envelope.")
 @click.option("--z", "start_z", default=None, type=float, help="Free mode: starting machine Z (mm). Default: center of the Z envelope.")
 @click.option("--exposure", default=5000.0, show_default=True, type=click.FloatRange(min=25.0), help="Free mode: starting exposure (us). The auto-exposure servo adjusts from here each frame until e/E/a turn it off.")
+@click.option("--y-stop", default=None, type=float, help="Gaussian mode: near end of the Y ladder (far end is --y). Default: 5 mm above the machine Y minimum.")
+@click.option("--planes", default=5, show_default=True, type=click.IntRange(min=1), help="Gaussian mode: number of ladder planes between --y and --y-stop.")
+@click.option("--mosaic", default=2, show_default=True, type=click.IntRange(min=1, max=4), help="Gaussian mode: n x n mosaic per plane (2 covers ~12x9 mm — the 9.5 mm input beam overfills a single 7.1x5.3 mm frame, and clipped tails bias width fits).")
+@click.option("--passes", default=None, type=click.IntRange(min=1), help="Gaussian mode: stop after this many ladder passes. Default: loop until q (the interactive steer-the-mirrors mode).")
 # -- output -----------------------------------------------------------------
 @click.option(
     "--dataset-root",
@@ -182,6 +190,10 @@ def align(
     start_x,
     start_z,
     exposure: float,
+    y_stop,
+    planes: int,
+    mosaic: int,
+    passes,
     dataset_root: Path,
     no_display: bool,
     skip_homing: bool,
@@ -201,6 +213,9 @@ def align(
         FREE_CONTINUE,
         FREE_KEY_ACTIONS,
         FREE_STOP,
+        GAUSS_CONTINUE,
+        GAUSS_REFIND,
+        GAUSS_STOP,
         STREAM_CONTINUE,
         STREAM_ORBIT,
         STREAM_REFIND,
@@ -211,7 +226,12 @@ def align(
         append_cycle_log,
         reference_snapshot_name,
     )
-    from align_preview import AlignPreview, CorePreview, FreePreview
+    from align_preview import (
+        AlignPreview,
+        CorePreview,
+        FreePreview,
+        GaussianPreview,
+    )
     from dataset_writer import DatasetWriterConfig, FLIRDatasetWriter
     from dataset_writer_cli import _load_camera_settings_for_software_trigger
     from fluidnc_stage import (
@@ -257,6 +277,7 @@ def align(
             "--probe-x": (probe_x, "x"),
             "--x": (start_x, "x"),
             "--z": (start_z, "z"),
+            "--y-stop": (y_stop, "y"),
         },
         limits,
     )
@@ -301,6 +322,10 @@ def align(
                 JobType="align",
                 DatasetRoot=dataset_root,
                 AcquisitionTimeout_ms=acquisition_timeout_ms,
+                # Run dirs read as align-<timestamp>_<optic>, so a day
+                # of runs sorts by time AND labels what was on the
+                # table: align-2026-08-03_18-51-47_axicon1.
+                RunSuffix=optic,
             ),
             stage_controller=stage,
         )
@@ -356,6 +381,8 @@ def align(
             if mode == "core"
             else FreePreview(config, display=not no_display)
             if mode == "free"
+            else GaussianPreview(config, display=not no_display)
+            if mode == "gaussian"
             else AlignPreview(config, display=not no_display)
         )
         cycle_log = run_dir / "alignment_log.jsonl"
@@ -390,7 +417,7 @@ def align(
                 preview.save_png(reference_snapshot)
             return not preview.quit_requested
 
-        if mode not in ("core", "free"):
+        if mode not in ("core", "free", "gaussian"):
             click.echo(
                 "\nStarting alignment. In the preview window: r = set "
                 "reference (zero the offset), o = orbit lap, f = re-find, "
@@ -398,7 +425,86 @@ def align(
             )
 
         try:
-            if mode == "free":
+            if mode == "gaussian":
+                import json
+
+                import numpy as np
+
+                y_near = (
+                    y_stop
+                    if y_stop is not None
+                    else limits.y_min_mm + 5.0
+                )
+                y_values = [
+                    round(float(v), 3)
+                    for v in np.linspace(machine_y, y_near, planes)
+                ]
+                logger.info(
+                    f"Gaussian ladder: {planes} planes, machine Y "
+                    f"{y_values[0]:g} -> {y_values[-1]:g} mm, "
+                    f"{mosaic}x{mosaic} mosaic per plane."
+                )
+
+                snap_dir = run_dir / "snapshots"
+                snap_dir.mkdir(exist_ok=True)
+                snap_count = [0]
+                gaussian_log = run_dir / "gaussian_log.jsonl"
+
+                click.echo(
+                    "\nGaussian input mode: walking the Y ladder; steer "
+                    "the input mirrors and watch the slope readout. "
+                    "r = save snapshot, f = re-find, q = quit."
+                )
+
+                def on_plane(sample, canvas, extent) -> str:
+                    preview.update_plane(sample, canvas, extent)
+
+                    with gaussian_log.open("a") as handle:
+                        handle.write(
+                            json.dumps(sample.to_jsonable()) + "\n"
+                        )
+
+                    if sample.Ladder is not None:
+                        logger.info(
+                            f"Pass {sample.Pass} Y{sample.MachineY_mm:g}: "
+                            f"slope X {sample.Ladder.SlopeX_mrad:+.2f} / "
+                            f"Z {sample.Ladder.SlopeZ_mrad:+.2f} mrad, "
+                            f"resid {sample.Ladder.ResidualX_mm:.3f}/"
+                            f"{sample.Ladder.ResidualZ_mm:.3f} mm"
+                        )
+
+                    if preview.save_requested:
+                        preview.save_requested = False
+                        snap_count[0] += 1
+                        stem = (
+                            f"gauss_pass{sample.Pass:02d}_"
+                            f"Y{sample.MachineY_mm:g}mm_"
+                            f"{snap_count[0]:03d}"
+                        )
+                        saved = preview.save_png(snap_dir / f"{stem}.png")
+                        if canvas is not None:
+                            np.save(snap_dir / f"{stem}.npy", canvas)
+                        logger.info(f"Snapshot saved: {saved}")
+
+                    preview.save_png(run_dir / "preview_latest.png")
+                    if preview.quit_requested:
+                        return GAUSS_STOP
+                    if preview.refind_requested:
+                        preview.refind_requested = False
+                        return GAUSS_REFIND
+                    return GAUSS_CONTINUE
+
+                session.run_gaussian(
+                    on_plane,
+                    y_values,
+                    mosaic_n=mosaic,
+                    max_passes=passes,
+                )
+                logger.info(
+                    f"Gaussian session done: per-plane fits in "
+                    f"{gaussian_log}"
+                )
+            elif mode == "free":
                 import json
 
                 import numpy as np
@@ -515,8 +621,15 @@ def align(
                     f"Core session done: snapshots in {snap_dir}"
                 )
             elif mode == "patrol":
+
+                def on_live(live_result, live_frames) -> None:
+                    preview.update_live(live_result, live_frames)
+
                 results = session.run(
-                    on_cycle, max_cycles=cycles, on_station=preview.on_station
+                    on_cycle,
+                    max_cycles=cycles,
+                    on_station=preview.on_station,
+                    on_live=on_live,
                 )
                 logger.info(
                     f"Alignment session done: {len(results)} cycles, "

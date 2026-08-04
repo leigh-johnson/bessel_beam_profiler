@@ -13,7 +13,10 @@ python cli.py align --y 20 --ring-diameter 12     # sanity prior for bootstrap
 python cli.py align --no-display --frames 100     # headless (SSH): log + PNGs only
 ```
 
-## Four modes
+## Modes
+
+(For where each mode fits in the staged alignment procedure, see
+[alignment_protocol.md](alignment_protocol.md).)
 
 **stream** (default): after the bootstrap and ONE orbit lap, the gantry
 parks on the ring (brightest station, or `--park-azimuth`) and streams
@@ -35,6 +38,10 @@ streaming of the Bessel core with live J0² fits — see
 **free**: no bootstrap, no fitting — a live camera view with keyboard
 X/Y/Z jogging from the preview window or the terminal — see
 [Free-stream mode](#free-stream-mode-live-view--keyboard-jogging).
+
+**gaussian**: protocol stage 1 — 2D-Gaussian fits on a machine-Y
+ladder with a live pointing-slope readout — see
+[Gaussian input mode](#gaussian-input-mode-stage-1).
 
 Stations sit ON the fitted ring, so by default the composite has a
 blind spot in the middle — fine for a thin annulus, not for a broad
@@ -124,27 +131,44 @@ overwritten.
 
 ## Fast feedback recipe (turning adjusters)
 
-Patrol laps are for surveying; for a tight adjust-watch-adjust loop
-use stream mode at ONE plane and cap the exposure:
+Where the time goes, in order: **feed rate** (motion dominates a lap;
+FluidNC clamps every move to the firmware max_rate — 500 mm/min,
+accel 100 mm/s² as of 2026-08-05, and the NEMA 11 motors don't want
+much more — so the CLI's `--feed 1500` default just means "run at the
+cap"), **exposure** (a dim-beam calibration at 300+ ms/frame slows
+everything — cap it), **Y-plane transits** (a 120 mm plane change is
+~15 s even at the cap — avoid `--y2` in the live loop), and
+**stations/fills** (each is a move).
 
-```
-python cli.py align --optic axicon2 --y 10 --probe-x 75 \
-    --max-exposure 100000 --feed 1500
-```
+The knob loop, fastest first:
 
-- stream (the default mode) parks after one orbit and updates center
-  offset + width every frame — feedback latency = exposure + fit,
-  fractions of a second, no motion.
+- **Stream mode at ONE plane** — parked, no motion, center offset +
+  width update every frame (latency = exposure + fit):
+
+  ```
+  python cli.py align --optic axicon2 --y 10 --probe-x 75 \
+      --max-exposure 50000
+  ```
+
+  Press `r` to zero, turn, watch dX/dZ live; press `o` for a full lap
+  when you want radius/roundness/uniformity refreshed.
+
+- **Patrol now refits LIVE after every station**: the ring, center,
+  roundness, and uniformity readouts update every ~1-2 s using the
+  latest arc from each station (marked "LIVE fit, N stations in").
+  A knob turn feeds into the live fit one station at a time and is
+  fully absorbed after one lap — so patrol is usable for adjusting
+  too, not just surveying. The history strip and the JSONL log still
+  advance only on definitive end-of-lap fits.
 - `--max-exposure` stops the dim-beam calibration from settling at
   300+ ms/frame: the background-referenced threshold tracks dim rings
   fine, and lap/stream rate scales directly with exposure.
-- `--feed` (mm/min) dominates lap time at low values — 300 means 5 mm/s
-  gantry moves and ~24 s per Y-plane change. Use the fastest feed the
-  rig moves cleanly at.
-- Press `r` to zero, turn the adjuster, watch dX/dZ live. Press `o`
-  for a full lap (radius/roundness/uniformity) after each coarse
-  adjustment. Save `--mode patrol --y2 --cover disk` for the
-  before/after survey, not the live loop.
+- Keep the live loop at ONE plane with `--cover ring` and 6-8
+  stations. Save `--mode patrol --y2 --cover disk` for the
+  before/after survey passes — the Y transit is most of their cost.
+- Incidence (tip/tilt) should not be dialed against camera metrics at
+  all — ring ellipticity is second-order in tilt. Use the retro
+  reflection (see alignment_protocol.md) and let the camera confirm.
 
 In the composite, GRAY pixels mean "no station frame imaged here"
 (coverage gaps between the ring and fill bands) — only black/purple
@@ -201,7 +225,10 @@ survive downsampling). Every frame shows, live:
   radial profile (half-pixel bins), and a J0^2 fit to the radial —
   with k_x, k_z, k_r quoted as % vs the ideal
   k_r = k (n-1) tan(alpha3) (`--alpha3`, `--index-n`,
-  `--wavelength-nm`), plus rms/A_fit and a [SATURATED] flag.
+  `--wavelength-nm`), plus rms/A_fit and a [SATURATED] flag. A k at
+  the fit's 0.3-3x bound is tagged **[FIT RAILED]** — a bound, not a
+  measurement (all three k's at exactly +200% = a plane where the
+  J0^2 model doesn't apply, e.g. outside the Bessel zone).
 
 Keys: `r` = save a snapshot (`snapshots/core_y<Y>mm_NNN.png` figure +
 the raw frame as `.npy`), `up`/`down` = jog machine Y by `--jog-step`
@@ -257,6 +284,34 @@ frames slow down until something bright appears — press `a` if that
 gets annoying while slewing across dark regions. Every frame is
 logged to `free_log.jsonl` (position, exposure, peak) so a jog
 session leaves a breadcrumb trail of where you looked.
+
+## Gaussian input mode (stage 1)
+
+`--mode gaussian` measures the INPUT beam before any axicon goes on
+the table — stage 1 of the staged protocol
+([alignment_protocol.md](alignment_protocol.md)):
+
+```
+python cli.py align --mode gaussian --y 130 --y-stop 10 --planes 5
+```
+
+It find-beams + calibrates once, then walks the Y ladder repeatedly
+(each pass ~1 min with 5 planes). Per plane: an n x n mosaic
+(`--mosaic`, default 2 — the 9.5 mm 1/e^2 beam overfills a single
+7.1 x 5.3 mm frame, and clipped tails bias Gaussian width fits low)
+is stitched and fit with a rotated elliptical 2D Gaussian. The window
+shows the stitched image + fitted 1/e^2 ellipse, centroid-vs-Y with
+line fits, and widths-vs-Y. The headline readout is the **pointing
+slope in mrad** (beam-frame sign: positive = walks toward +X/+Z going
+downstream) with line-fit residuals — slope is beam tilt vs the
+gantry axis; residuals are rail wiggle + fit noise.
+
+Passes loop until `q`, so this is the interactive steer-the-mirrors
+mode: far mirror for angle, near mirror for position, walk them until
+the slopes are at zero. Keys: `r` = save snapshot (figure PNG +
+stitched canvas `.npy`), `f` = re-find, `q` = quit. Per-plane fits
+land in `gaussian_log.jsonl` (`--passes N` for an unattended
+fixed-length record).
 
 ## Other optics (e.g. after axicon 2)
 

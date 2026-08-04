@@ -89,6 +89,34 @@ def test_prepare_run_writes_settings_and_metadata(dataset_writer_module, tmp_pat
     assert "TablePosition_mm" in metadata["CoordinateConvention"]
 
 
+def test_make_run_dir_appends_sanitized_suffix(
+    dataset_writer_module, tmp_path
+):
+    # e.g. the align CLI passes --optic: align-<timestamp>_axicon1.
+    config = dataset_writer_module.DatasetWriterConfig(
+        DatasetRoot=tmp_path, JobType="align", RunSuffix="axicon1"
+    )
+    assert config.make_run_dir().name.endswith("_axicon1")
+    assert config.make_run_dir().name.startswith("align-")
+
+    # Unsafe characters collapse to '-'; an empty/unsafe suffix or the
+    # default keeps the historical name.
+    messy = dataset_writer_module.DatasetWriterConfig(
+        DatasetRoot=tmp_path, JobType="align", RunSuffix="axicon 1 (new!)"
+    )
+    assert messy.make_run_dir().name.endswith("_axicon-1-new")
+
+    import re
+
+    plain = dataset_writer_module.DatasetWriterConfig(
+        DatasetRoot=tmp_path, JobType="align"
+    )
+    assert re.fullmatch(
+        r"align-\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}",
+        plain.make_run_dir().name,
+    )
+
+
 def test_acquire_scan_writes_npy_manifest_and_coordinate_record(
     dataset_writer_module,
     coordinates_module,
