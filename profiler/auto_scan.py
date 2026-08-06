@@ -247,7 +247,7 @@ def _grab_frame(writer, timeout_ms: int) -> Optional[np.ndarray]:
     # extend it by the current exposure time so the grab cannot time out
     # while the sensor is legitimately still integrating.
     try:
-        timeout_ms = int(timeout_ms + writer.cam.ExposureTime.GetValue() / 1000.0)
+        timeout_ms = int(timeout_ms + (writer.cam.ExposureTime.GetValue() / 1000.0))
     except Exception as ex:  # noqa: BLE001 - fall back to the base timeout
         logger.warning(
             f"Could not read ExposureTime to extend the grab timeout ({ex}); "

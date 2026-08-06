@@ -1,0 +1,12 @@
+{
+  "Reused": false,
+  "SliceExposure_us": 244984.04745006,
+  "BackgroundExposure_us": 244984.04745006,
+  "BackgroundSlice": "y0130.00cm",
+  "BackgroundMachineY_mm": 130.0,
+  "ExposureChangeFraction": null,
+  "MaxExposureChangeFraction": 0.1,
+  "BackgroundPaths": [
+    "data/auto_scan-2026-08-05_20-13-12/y0130.00cm/aug5_axicon3_012-background-tableyp001300.000mm-gantryxp000004.000mm-yp000130.000mm-zm000112.100mm-shot0000.npy"
+  ]
+}
