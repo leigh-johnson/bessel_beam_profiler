@@ -1,0 +1,13 @@
+{
+  "MachineY_mm": 70.0,
+  "BeamY_mm": 960.0,
+  "MeasuredFrom": "axicon3",
+  "CalibrationX_mm": 65.0,
+  "CalibrationZ_mm": -77.1,
+  "FinalExposure_us": 803.7812499999998,
+  "LastMax": 177,
+  "LastSaturatedPixels": 0,
+  "Iterations": 1,
+  "Converged": true,
+  "Note": ""
+}
