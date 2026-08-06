@@ -43,7 +43,7 @@ class DatasetWriterConfig:
     # trigger fired while the camera is still arming can be silently
     # dropped (GenTL -1011 timeout on GetNextImage); this avoids paying
     # the timeout-and-retry penalty at every raster point.
-    TriggerArmDelay_s: float = 0.1
+    TriggerArmDelay_s: float = 2.0
 
     # Pause before restarting acquisition after in-place re-triggers fail
     # (persistent -1011). Gives a congested/stalled camera link a moment
@@ -490,7 +490,6 @@ class FLIRDatasetWriter(FLIRCameraControllerBase):
         up. Both observed 2026-08-03 killing auto scans in step with
         FluidNC WiFi drops.
         """
-
         if self._is_camera_removed_error(ex):
             logger.warning(
                 f"Camera removal during shot {shot_idx} at "
@@ -561,7 +560,7 @@ class FLIRDatasetWriter(FLIRCameraControllerBase):
     def _is_incomplete_image_error(ex: Exception) -> bool:
         return "Image incomplete" in str(ex)
 
-    def _trigger_and_get_image(self, retries: int = 2):
+    def _trigger_and_get_image(self, retries: int = 2, retry_pause_s: float = 3) -> PySpin.ImagePtr:
         """
         Software-trigger the camera and fetch a COMPLETE image.
 
@@ -576,7 +575,7 @@ class FLIRDatasetWriter(FLIRCameraControllerBase):
           missing packets). The frame data has holes, so it is released
           and re-triggered rather than saved.
         """
-
+    
         attempt = 0
 
         while True:
@@ -587,17 +586,13 @@ class FLIRDatasetWriter(FLIRCameraControllerBase):
                     self.config.AcquisitionTimeout_ms
                 )
             except PySpin.SpinnakerException as ex:
-                if attempt < retries and "-1011" in str(ex):
+                logger.warning("Attempting to re-trigger after GetNextImage failure: %s", ex)
+                if attempt < retries:
                     attempt += 1
-                    logger.warning(
-                        "GetNextImage timed out (dropped software trigger?); "
-                        f"re-triggering (attempt {attempt}/{retries}). "
-                        "If this repeats every frame, check that SpinView "
-                        "is fully closed."
-                    )
+                    time.sleep(retry_pause_s)
                     continue
                 raise
-
+                
             if not image_result.IsIncomplete():
                 return image_result
 

@@ -5,6 +5,7 @@ import gc
 import logging
 import sys
 import traceback
+import time
 
 from camera_settings import FLIRCameraSettings
 
@@ -149,6 +150,7 @@ class FLIRCameraControllerBase:
             raise FLIRCameraError("Unable to execute TriggerSoftware.")
 
         command.Execute()
+        time.sleep(self.camera_settings.TriggerArmDelay_s)  # wait for the camera to arm
 
     def reopen(self, retries: int = 5, delay_s: float = 3.0) -> None:
         """
