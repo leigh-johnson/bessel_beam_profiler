@@ -579,7 +579,7 @@ class FLIRDatasetWriter(FLIRCameraControllerBase):
         attempt = 0
 
         while True:
-            self._execute_software_trigger()
+            self._execute_software_trigger(self.config.TriggerArmDelay_s)
 
             try:
                 image_result = self.cam.GetNextImage(

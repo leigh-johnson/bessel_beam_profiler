@@ -142,7 +142,7 @@ class FLIRCameraControllerBase:
     def _end_acquisition(self) -> None:
         return self.cam.EndAcquisition()
     
-    def _execute_software_trigger(self) -> None:
+    def _execute_software_trigger(self, delay_s: float = 2.0) -> None:
         nodemap = self.cam.GetNodeMap()
         command = PySpin.CCommandPtr(nodemap.GetNode("TriggerSoftware"))
 
@@ -150,7 +150,6 @@ class FLIRCameraControllerBase:
             raise FLIRCameraError("Unable to execute TriggerSoftware.")
 
         command.Execute()
-        time.sleep(self.camera_settings.TriggerArmDelay_s)  # wait for the camera to arm
 
     def reopen(self, retries: int = 5, delay_s: float = 3.0) -> None:
         """
