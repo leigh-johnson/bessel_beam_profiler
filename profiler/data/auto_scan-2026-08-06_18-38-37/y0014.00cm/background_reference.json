@@ -1,0 +1,14 @@
+{
+  "Reused": true,
+  "SliceExposure_us": 2162.5329027222774,
+  "BackgroundExposure_us": 2162.5329027222774,
+  "BackgroundSlice": "y0012.00cm",
+  "BackgroundMachineY_mm": 60.0,
+  "ExposureChangeFraction": 0.0,
+  "MaxExposureChangeFraction": 0.1,
+  "BackgroundPaths": [
+    "data/auto_scan-2026-08-06_18-38-37/y0012.00cm/aug6_telescope_001-background-tableyp000120.000mm-gantryxp000004.000mm-yp000060.000mm-zm000112.100mm-shot0000.npy",
+    "data/auto_scan-2026-08-06_18-38-37/y0012.00cm/aug6_telescope_001-background-tableyp000120.000mm-gantryxp000004.000mm-yp000060.000mm-zm000112.100mm-shot0001.npy",
+    "data/auto_scan-2026-08-06_18-38-37/y0012.00cm/aug6_telescope_001-background-tableyp000120.000mm-gantryxp000004.000mm-yp000060.000mm-zm000112.100mm-shot0002.npy"
+  ]
+}
