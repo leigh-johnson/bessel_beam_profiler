@@ -1,0 +1,82 @@
+{
+  "MachineY_mm": 20.0,
+  "BeamY_mm": 360.0,
+  "RasterMode": "adaptive",
+  "Center_mm": [
+    55.0,
+    -98.1
+  ],
+  "Step_mm": [
+    5.0,
+    4.0
+  ],
+  "Cap_mm": {
+    "XMin": 4.0,
+    "XMax": 107.0,
+    "YMin": -112.1,
+    "YMax": 2.0
+  },
+  "SignalThreshold_counts": 13.0,
+  "MinSignalPixels": 50,
+  "BorderStripFraction": 0.15,
+  "BorderTest": "any",
+  "Iterations": [
+    {
+      "Pass": 1,
+      "BlindProbe": false,
+      "Grew": [],
+      "Stopped": {
+        "+x": "dark",
+        "-x": "dark",
+        "+y": "dark",
+        "-y": "dark"
+      },
+      "CellsAdded": []
+    }
+  ],
+  "EdgeStops": {
+    "+x": "dark",
+    "-x": "dark",
+    "+y": "dark",
+    "-y": "dark"
+  },
+  "TruncatedSides": [],
+  "GridShape": [
+    1,
+    1
+  ],
+  "FinalRect_mm": {
+    "XMin": 55.0,
+    "XMax": 55.0,
+    "YMin": -98.1,
+    "YMax": -98.1
+  },
+  "CellsCaptured": 1,
+  "FixedGridCells": 609,
+  "BeamFitsInSingleFrame": true,
+  "BeamFound": true,
+  "BlindProbePassesUsed": 0,
+  "Cells": [
+    {
+      "I": 0,
+      "J": 0,
+      "X_mm": 55.0,
+      "Y_mm": -98.1,
+      "AnySignal": true,
+      "BorderSignal": {
+        "+x": false,
+        "-x": false,
+        "+y": false,
+        "-y": false
+      },
+      "Paths": [
+        "data/auto_scan-2026-08-06_20-57-25/y0036.00cm/aug6_telescope_003-tableyp000360.000mm-gantryxp000055.000mm-yp000020.000mm-zm000098.100mm-shot0000.npy"
+      ]
+    }
+  ],
+  "SignalThresholdSource": "fallback(5)+margin(8) \u2014 no per-slice background available",
+  "LatticeAxes": {
+    "x": "machine X",
+    "y": "machine Z"
+  }
+}
