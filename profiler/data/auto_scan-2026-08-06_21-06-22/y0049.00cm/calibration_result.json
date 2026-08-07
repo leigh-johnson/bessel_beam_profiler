@@ -1,0 +1,13 @@
+{
+  "MachineY_mm": 90.0,
+  "BeamY_mm": 490.0,
+  "MeasuredFrom": "f_200mm",
+  "CalibrationX_mm": 55.0,
+  "CalibrationZ_mm": -97.1,
+  "FinalExposure_us": 823.8549794578154,
+  "LastMax": 171,
+  "LastSaturatedPixels": 0,
+  "Iterations": 1,
+  "Converged": true,
+  "Note": ""
+}
