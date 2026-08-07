@@ -1,0 +1,35 @@
+{
+  "PlacementID": "aug6_axicon3_013",
+  "CoordinateConvention": "X horizontal transverse, Y beam propagation, Z vertical; machine == table except TableY, anchored to the optic.",
+  "MeasuredSensorY_mm": 1300.0,
+  "MeasuredFrom": "axicon3",
+  "YStart_machine_mm": 130.0,
+  "YStop_machine_mm": 10.0,
+  "YStep_mm": 10.0,
+  "BeamDirectionSign": -1,
+  "X": {
+    "start_mm": 4.0,
+    "stop_mm": 107.0,
+    "step_mm": 5.0
+  },
+  "Z": {
+    "start_mm": -112.1,
+    "stop_mm": 2.0,
+    "step_mm": 4.0
+  },
+  "RasterMode": "adaptive",
+  "NShots": 1,
+  "BackgroundMode": "none",
+  "BackgroundShots": 3,
+  "Metadata": {
+    "OpticConfiguration": {
+      "GaussianBeamWaist_mm": 4.65,
+      "Axicon1_deg": 5.0,
+      "Axicon2_deg": 5.0,
+      "Axicon3_deg": 0.5,
+      "L12_mm": 175.0,
+      "L23_mm": 415.0
+    }
+  },
+  "PlacementNotes": "MeasuredSensorY=1300mm after axicon3 at machine Y=130mm; BeamDirectionSign=-1 (machine +Y toward the optic)"
+}

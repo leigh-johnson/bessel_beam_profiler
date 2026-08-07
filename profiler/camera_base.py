@@ -5,6 +5,7 @@ import gc
 import logging
 import sys
 import traceback
+import time
 
 from camera_settings import FLIRCameraSettings
 
@@ -141,7 +142,7 @@ class FLIRCameraControllerBase:
     def _end_acquisition(self) -> None:
         return self.cam.EndAcquisition()
     
-    def _execute_software_trigger(self) -> None:
+    def _execute_software_trigger(self, delay_s: float = 2.0) -> None:
         nodemap = self.cam.GetNodeMap()
         command = PySpin.CCommandPtr(nodemap.GetNode("TriggerSoftware"))
 

@@ -241,7 +241,7 @@ def y_subfolder_name(beam_y_mm: float) -> str:
 
 
 def _grab_frame(writer, timeout_ms: int) -> Optional[np.ndarray]:
-    writer._execute_software_trigger()
+    writer._execute_software_trigger(writer.config.TriggerArmDelay_s)
 
     # Long exposures (dim slices) can exceed the base acquisition timeout;
     # extend it by the current exposure time so the grab cannot time out

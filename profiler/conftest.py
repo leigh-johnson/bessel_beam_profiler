@@ -262,6 +262,7 @@ class FakeCamera:
 
 
 class FakeCameraSettings:
+    TriggerArmDelay_s: float = 0.0  # default for tests that don't care
     def __init__(self):
         self.apply_calls = []
         self.saved_paths = []
