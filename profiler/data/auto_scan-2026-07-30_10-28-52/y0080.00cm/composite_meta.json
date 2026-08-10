@@ -1,8 +1,8 @@
 {
   "Frames": 15,
   "PixelSize_um": 3.45,
-  "Downsample": 8,
-  "mm_per_px": 0.027600000000000003,
+  "Downsample": 2,
+  "mm_per_px": 0.006900000000000001,
   "FlipX": true,
   "FlipZ": true,
   "Transpose": false,
@@ -10,13 +10,13 @@
   "DarkFramesExcluded": 21,
   "Extent_mm": {
     "XMin": 71.4672,
-    "XMax": 93.51960000000001,
-    "ZMin": -94.75559999999999,
+    "XMax": 93.5334,
+    "ZMin": -94.74869999999999,
     "ZMax": -77.45039999999999
   },
   "CanvasShape": [
-    627,
-    799
+    2507,
+    3198
   ],
   "PeakMean_counts": 255.0,
   "MachineY_mm": 130.0,
