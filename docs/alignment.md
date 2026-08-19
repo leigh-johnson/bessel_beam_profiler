@@ -1,4 +1,109 @@
-# Axicon alignment tool (`align`)
+# Alignment
+
+Two halves of the same job: the **procedure** for aligning the cavity
+one optic at a time, and the reference for the **`align` CLI** that
+provides the live feedback each stage is signed off against.
+
+- [Staged alignment protocol](#staged-alignment-protocol) — what you
+  do at the bench, in order, and the sign-off thresholds.
+- [The `align` tool](#the-align-tool) — modes, metrics, keys, and
+  outputs.
+
+## Staged alignment protocol
+
+One optic at a time. Sign off each stage before placing the next;
+after sign-off, never touch that stage's knobs again (if you must,
+re-run its check). Per stage, three DOFs → three sensors, in order:
+
+1. **Incidence (tip/tilt)**: retro-reflect the axicon's flat face back
+   to an iris at the source. First-order in tilt (1 mrad = 2 mm at
+   1 m). Do NOT dial tilt against ring ellipticity — it's second-order
+   and hides degrees.
+2. **Centering (XZ)**: azimuthal uniformity — first-order; the bright
+   sector points along the decenter.
+3. **Axis straightness**: center vs machine Y. The gantry Y travel is
+   the reference axis; slope = tilt, ladder residuals = rail wiggle.
+
+### Stage 1 — input beam
+
+No optics on the table yet.
+
+```
+python cli.py align --mode gaussian --optic input --y 130 --y-stop 10 --planes 5
+```
+
+Ladder loops until `q`. Steer far mirror (angle) + near mirror
+(position); watch the slope readout. Sign-off: |slope| < 0.2 mrad
+both axes, residuals flat; record w0 and astigmatism (the 2×2 mosaic
+handles the beam overfilling the sensor).
+
+See [Gaussian input mode](#gaussian-input-mode) for what the mode
+measures and how the fits are logged.
+
+### Stage 2 — axicon 1
+
+Retro-reflect first. Then center, at a plane in the L12 region:
+
+```
+python cli.py align --mode patrol --optic axicon1 --y 20 --max-exposure 50000
+```
+
+Metrics refit live every station (~1–2 s). Dial uniformity modulation
+down; press `r` to zero, `--notes` the result. Then verify
+straightness + cone over two planes:
+
+```
+python cli.py align --mode patrol --optic axicon1 --y 130 --y2 10 \
+    --ring-diameter <d@130> --ring-diameter2 <d@10>
+```
+
+Sign-off: modulation < ~10%, center straight vs Y, cone ≈ 40.1 mrad
+(±few %). See [Diverging cones](#diverging-cones-eg-after-axicon-1)
+for the per-plane priors and what **cone** reads here.
+
+### Stage 3 — axicon 2
+
+Retro-reflect first. Center (same patrol command, `--optic axicon2`,
+one plane). Exit criterion — the annulus leaves COLLIMATED:
+
+```
+python cli.py align --mode patrol --optic axicon2 --y 130 --y2 10
+```
+
+Sign-off: cone ≈ 0 (±0.5 mrad), radius ≈ θ·L12, center straight.
+An uncollimated annulus here is what a railed kr reads like in
+stage 4. See [Other optics](#other-optics-eg-after-axicon-2) for the
+radius-vs-Y collimation check.
+
+### Stage 4 — axicon 3
+
+Retro-reflect first. Then core mode (default for axicon3):
+
+```
+python cli.py align --optic axicon3 --y <core plane> --probe-x <x crossing the core>
+```
+
+Jog Y (arrows) to map the zone. Sign-off: kx ≈ kz, kr within a few %
+of ideal, rms/A_fit < 0.01, zone extent ≈ z_max = w0/θ.
+**[FIT RAILED]** or rms/A ≫ 0.01 = the model doesn't apply at this
+plane (wrong plane / annulus light) — jog, don't turn knobs.
+
+See [Core mode](#core-mode) for the fit details, and
+[Focused Bessel region](#focused-bessel-region-after-axicon-3) if you
+are patrolling the compact spot rather than fitting the core.
+
+### Rules
+
+- Pin exposure when comparing runs (`--max-exposure`).
+- Ambiguous signature? Rotate the axicon 90°: rotates with it =
+  manufacturing defect; fixed in lab frame = alignment.
+- Scorecard at every sign-off: `--notes` + `r` snapshot. "Aligned" =
+  thresholds recorded and passed.
+- Motion is firmware-capped at 500 mm/min, accel 100 mm/s²
+  (config.yaml, 2026-08-05; NEMA 11 motors — don't raise run_amps).
+  The CLI's `--feed 1500` default just means "run at the cap".
+
+## The `align` tool
 
 Live alignment feedback for the annulus after axicon 3, using the CNC
 gantry as a roving eye. The ring (~9.5 mm+) is wider than the BFS
@@ -13,10 +118,10 @@ python cli.py align --y 20 --ring-diameter 12     # sanity prior for bootstrap
 python cli.py align --no-display --frames 100     # headless (SSH): log + PNGs only
 ```
 
-## Modes
+### Modes
 
-(For where each mode fits in the staged alignment procedure, see
-[alignment_protocol.md](alignment_protocol.md).)
+(For where each mode fits in the staged procedure, see
+[Staged alignment protocol](#staged-alignment-protocol).)
 
 **stream** (default): after the bootstrap and ONE orbit lap, the gantry
 parks on the ring (brightest station, or `--park-azimuth`) and streams
@@ -29,19 +134,20 @@ uniformity and re-parks; `f` re-runs the find-beam bootstrap.
 
 **patrol**: orbit continuously; every lap refreshes ALL metrics
 (~10–20 s feedback latency, full-ring truth every time). Required for
-the two-plane tilt readout (`--y2`).
+the two-plane tilt readout (`--y2`). Used in
+[stage 2](#stage-2--axicon-1) and [stage 3](#stage-3--axicon-2).
 
 **core** (default when `--optic` is axicon3): parked native-resolution
 streaming of the Bessel core with live J0² fits — see
-[Core mode](#core-mode-axicon-3).
+[Core mode](#core-mode). This is [stage 4](#stage-4--axicon-3).
 
 **free**: no bootstrap, no fitting — a live camera view with keyboard
 X/Y/Z jogging from the preview window or the terminal — see
-[Free-stream mode](#free-stream-mode-live-view--keyboard-jogging).
+[Free-stream mode](#free-stream-mode).
 
-**gaussian**: protocol stage 1 — 2D-Gaussian fits on a machine-Y
-ladder with a live pointing-slope readout — see
-[Gaussian input mode](#gaussian-input-mode-stage-1).
+**gaussian**: [stage 1](#stage-1--input-beam) — 2D-Gaussian fits on a
+machine-Y ladder with a live pointing-slope readout — see
+[Gaussian input mode](#gaussian-input-mode).
 
 Stations sit ON the fitted ring, so by default the composite has a
 blind spot in the middle — fine for a thin annulus, not for a broad
@@ -50,7 +156,7 @@ plus one at the center; those interior frames fill the composite but
 are EXCLUDED from the ring fit, so interior diffraction light cannot
 drag the geometry.
 
-## What it does
+### What it does
 
 1. **Bootstrap** (reused from `dataset auto`): find-beam sweep locates
    structured light along a Z column at `--probe-x` (default: middle of
@@ -111,7 +217,7 @@ cover a small fraction of the frame, but a broad beam that FILLS a
 frame makes the median read as signal and dim arcs vanish (this
 exactly happened on the wide axicon-2 band, 2026-07-27).
 
-## The preview window
+### The preview window
 
 Left: the patrolled ring stitched in machine coordinates with the
 fitted ellipse (cyan), fitted center (cyan +), reference (green +),
@@ -129,15 +235,14 @@ run directory, named with the reference center it just set (e.g.
 reference-set moment, since `preview_latest.png` keeps being
 overwritten.
 
-## Fast feedback recipe (turning adjusters)
+### Fast feedback recipe (turning adjusters)
 
 Where the time goes, in order: **feed rate** (motion dominates a lap;
-FluidNC clamps every move to the firmware max_rate — 500 mm/min,
-accel 100 mm/s² as of 2026-08-05, and the NEMA 11 motors don't want
-much more — so the CLI's `--feed 1500` default just means "run at the
-cap"), **exposure** (a dim-beam calibration at 300+ ms/frame slows
-everything — cap it), **Y-plane transits** (a 120 mm plane change is
-~15 s even at the cap — avoid `--y2` in the live loop), and
+FluidNC clamps every move to the firmware max_rate, so the CLI's
+`--feed 1500` default just means "run at the cap" — see
+[Rules](#rules)), **exposure** (a dim-beam calibration at 300+ ms/frame
+slows everything — cap it), **Y-plane transits** (a 120 mm plane change
+is ~15 s even at the cap — avoid `--y2` in the live loop), and
 **stations/fills** (each is a move).
 
 The knob loop, fastest first:
@@ -168,14 +273,15 @@ The knob loop, fastest first:
   before/after survey passes — the Y transit is most of their cost.
 - Incidence (tip/tilt) should not be dialed against camera metrics at
   all — ring ellipticity is second-order in tilt. Use the retro
-  reflection (see alignment_protocol.md) and let the camera confirm.
+  reflection (see [the protocol's DOF order](#staged-alignment-protocol))
+  and let the camera confirm.
 
 In the composite, GRAY pixels mean "no station frame imaged here"
 (coverage gaps between the ring and fill bands) — only black/purple
 through yellow is actual beam data. For a gap-free full image of the
 plane, use `dataset auto`, which rasters the whole slice.
 
-## Diverging cones (e.g. after axicon 1)
+### Diverging cones (e.g. after axicon 1)
 
 Each Y plane bootstraps and tracks its own radius, so a cone whose
 diameter grows along the beam works out of the box. Two things help:
@@ -190,7 +296,7 @@ diameter grows along the beam works out of the box. Two things help:
   Remember the radius is the band's intensity-weighted centroid and is
   exposure-sensitive — pin `--max-exposure` when comparing.
 
-## Focused Bessel region (after axicon 3)
+### Focused Bessel region (after axicon 3)
 
 In the focused region the pattern is a compact spot (bright core +
 close-in fringes), typically a few mm across or less — not a thin
@@ -212,7 +318,7 @@ centroid. Parameter notes:
 - Fewer stations cover a tiny orbit fine (`--stations 8`), and
   `--cover ring` is enough: one frame already spans the whole spot.
 
-## Core mode (axicon 3)
+### Core mode
 
 `--mode core` — the default whenever `--optic` is axicon3 — is for the
 focused Bessel core, where ring patrols are meaningless. It find-beams
@@ -245,7 +351,10 @@ The usual self-healing applies: consecutive lost frames re-run
 find-beam automatically, and a failed re-find backs off and keeps
 streaming.
 
-## Free-stream mode (live view + keyboard jogging)
+For the sign-off thresholds this mode feeds, see
+[Stage 4](#stage-4--axicon-3).
+
+### Free-stream mode
 
 `--mode free` is the "just show me the camera" mode: NO bootstrap, no
 fitting, no compositing — the gantry moves to a start position and
@@ -285,11 +394,10 @@ gets annoying while slewing across dark regions. Every frame is
 logged to `free_log.jsonl` (position, exposure, peak) so a jog
 session leaves a breadcrumb trail of where you looked.
 
-## Gaussian input mode (stage 1)
+### Gaussian input mode
 
 `--mode gaussian` measures the INPUT beam before any axicon goes on
-the table — stage 1 of the staged protocol
-([alignment_protocol.md](alignment_protocol.md)):
+the table — [stage 1](#stage-1--input-beam) of the staged protocol:
 
 ```
 python cli.py align --mode gaussian --y 130 --y-stop 10 --planes 5
@@ -313,7 +421,7 @@ stitched canvas `.npy`), `f` = re-find, `q` = quit. Per-plane fits
 land in `gaussian_log.jsonl` (`--passes N` for an unattended
 fixed-length record).
 
-## Other optics (e.g. after axicon 2)
+### Other optics (e.g. after axicon 2)
 
 The tool is optic-agnostic — it finds and fits whatever ring the
 camera can reach. To check the annulus after axicon 2 (the relay feed
@@ -325,7 +433,7 @@ to axicon 3), tag the run with `--optic axicon2` and prefer
   `alignment_log.jsonl`) = collimation check on the 1<->2 spacing: a
   collimated relay has the same radius at both planes.
 
-## Self-healing (inherited from the auto-scan stack)
+### Self-healing (inherited from the auto-scan stack)
 
 - Exposure: a cycle-level servo halves exposure on saturation and
   doubles it when everything is dim; a camera reconnect (GigE -1024)
@@ -341,7 +449,7 @@ interpretable later: `--optic axicon2 --notes "camera y2 at L_12=290mm"
 --notes "walked input mirror +1/4 turn CW"` — every `--notes` string is
 recorded in the run's `align_session.json` and echoed into `align.log`.
 
-## Outputs
+### Outputs
 
 Each session makes one timestamped run directory under
 `--dataset-root` (default `data/align-runs/`):
@@ -355,7 +463,7 @@ Each session makes one timestamped run directory under
   the reference center coordinates set at that moment
 - `align.log` — full log, same format as scan.log
 
-## Module map
+### Module map
 
 - `align_axicon.py` — patrol session + all pure geometry (arc
   extraction, circle/ellipse fits, chord bootstrap, uniformity);
