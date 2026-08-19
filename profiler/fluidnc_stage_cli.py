@@ -128,7 +128,7 @@ def _make_client(host: str, port: int):
 @click.group(name="gantry")
 def gantry() -> None:
     """
-    Talk to the FluidNC CNC gantry directly (no camera involved).
+    Communicate with FluidNC CNC gantry controller via telnet.
     """
 
 

@@ -93,10 +93,11 @@ Workflow per placement (repeats for as many placements as you want):
   (all four border strips of the seed frame are dark). The raster lattice
   is generic 2D; in this scan its axes map to lattice-x = machine X,
   lattice-y = machine Z (recorded as `LatticeAxes` in the metadata). The
-  default border test (`any`) is orientation-independent and may overshoot
-  the beam extent by ~1 frame per side; once you've verified how image
-  axes map to machine axes, `BorderTest="directional"` in `AutoScanConfig`
-  (with `ImageTranspose`/`ImageFlipX`/`ImageFlipY`) removes the overshoot.
+  border test is orientation-independent — a frame counts as having border
+  signal if ANY of its four strips does — so it needs no image↔machine axis
+  mapping, at the cost of overshooting the beam extent by ~1 frame per
+  side. Those surplus frames are dark on every strip, so they are labeled
+  `-dark` and excluded from composites by default.
 * `fixed`: always raster the full X × Z grid.
 
 Ring-beam safeguards (all on by default):
@@ -149,11 +150,6 @@ stopped (`dark`/`cap`), the signal threshold and where it came from, and
   `background_reference.json` (which background frames apply, their
   exposure, the change fraction) — analysis should always resolve the
   background through that file rather than assuming one per folder.
-* `ladder`: once per placement, you block the beam when prompted and a
-  log-spaced exposure ladder is captured (default 10 rungs, 25 µs → 100 ms,
-  3 shots each) into `background/`. At analysis time subtract the rung
-  nearest each frame's exposure (or interpolate — background is ~linear in
-  exposure). Use this if the off-axis position can't be made beam-free.
 * `none` (or `--skip-background`): quick alignment runs.
 
 ## Output layout
@@ -164,11 +160,8 @@ data/auto_scan-2026-07-22_14-01-05/        # one run dir per placement
     auto_scan_setup.json                   # placement, ranges, convention
     camera_settings.json
     frames.jsonl                           # global manifest (all frames)
-    background/                            # ladder mode only
-        frames.jsonl
-        placement-01-exp0000100.0us-...-shot0000.npy  (+ .jpg)
     y0100.00cm/                            # distance along the beam
-        frames.jsonl                       # per-slice manifest (stitchable)
+        frames.jsonl                       # per-slice manifest (compositable)
         calibration_result.json            # exposure, max, converged
         calibrated_camera_settings.json
         raster_metadata.json               # grid, growth history, edge stops,
@@ -189,8 +182,7 @@ Every frame's manifest record carries `Exposure_us`, `MachineY_mm`,
 (`AutoBeamStack` / `Background`; off-axis backgrounds also record
 `BackgroundMode: OffAxisAmbient` and their gantry position). In offaxis
 mode, subtraction is trivial: each slice folder resolves its own
-exposure-matched background through `background_reference.json`. In ladder
-mode, pick the rung nearest each frame's exposure or interpolate.
+exposure-matched background through `background_reference.json`.
 
 ## Logging
 
@@ -198,7 +190,7 @@ The CLI configures Python logging at INFO by default (`--log-level` on the
 top-level `cli` group changes it). All scan progress — slice headers,
 calibration results, background capture/reuse decisions, adaptive-raster
 growth and truncation warnings — goes through `logging`, so the dataset
-subcommands (`auto`, `static`, `manual`, `stitch`) mirror everything into
+subcommands (`auto`, `static`, `manual`) mirror everything into
 a timestamped `scan.log` inside the run directory, next to the data it
 describes. For `dataset auto`, each placement's run directory gets its own
 scan.log (the handler swaps when a new placement starts). Interactive

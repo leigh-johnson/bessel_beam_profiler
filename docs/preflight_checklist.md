@@ -87,8 +87,7 @@ Then inspect the run directory:
 - [ ] At the dimmest slice's Y and exposure, compare a corner frame
       (beam ON) with one where you physically block the beam. If they
       match, the ambient-only assumption holds. If not, pick a different
-      `--background-x/--background-z`, or fall back to
-      `--background-mode ladder`.
+      `--background-x/--background-z`.
 
 ## 7. Full placement
 
@@ -100,8 +99,9 @@ Then inspect the run directory:
 ## Known limitations today
 
 * No auto-resume after a WiFi drop or crash — restart the placement.
-* Adaptive raster's `any` border test may overshoot the beam by ~1 frame
-  per side (orientation-safe). After verifying the image↔machine axis
-  mapping, `BorderTest="directional"` removes it.
-* Stitching is a separate step (`dataset stitch <run>/y0100.00cm`) and
-  still uses image registration, not commanded positions.
+* Adaptive raster's border test may overshoot the beam by ~1 frame per
+  side. This is by design — it is orientation-safe, needing no image↔machine
+  axis mapping — and the surplus frames are labeled `-dark` and excluded
+  from composites.
+* Compositing is a separate step (`dataset composite <run>/y0100.00cm`),
+  which places frames at their commanded positions.

@@ -99,23 +99,6 @@ def test_explicit_subfolder_groups_frames_and_manifests(modules, tmp_path):
     assert json.loads(root_lines[0]) == json.loads(sub_lines[0])
 
 
-def test_group_by_y_config_flag_names_subfolder_from_table_y(modules, tmp_path):
-    arr = np.zeros((2, 2), dtype=np.uint8)
-    writer = make_writer(
-        modules,
-        tmp_path,
-        images=[FakeImage(arr)],
-        GroupByYSubfolder=True,
-    )
-
-    records = writer.acquire_scan([make_point(modules, beam_y_mm=1000.0)])
-
-    assert (
-        modules.dataset_writer.Path(records[0].Path).parent
-        == writer.run_dir / "y_p001000.000mm"
-    )
-
-
 def test_no_subfolder_by_default(modules, tmp_path):
     arr = np.zeros((2, 2), dtype=np.uint8)
     writer = make_writer(modules, tmp_path, images=[FakeImage(arr)])
@@ -160,7 +143,7 @@ def make_session(
     modules,
     tmp_path,
     n_images=32,
-    background_mode="ladder",
+    background_mode="none",
     background_x_mm=None,
     background_z_mm=None,
     background_exposure_change=0.0,  # most tests: capture at every slice
@@ -194,17 +177,11 @@ def make_session(
         BackgroundX_mm=background_x_mm,
         BackgroundZ_mm=background_z_mm,
         BackgroundExposureChangeFraction=background_exposure_change,
-        BackgroundExposures_us=(100.0, 1000.0),
         BackgroundShots=1,
     )
 
-    pauses = []
-    session = modules.auto_scan.AutoScanSession(
-        writer,
-        config,
-        pause_fn=pauses.append,
-    )
-    return session, writer, pauses
+    session = modules.auto_scan.AutoScanSession(writer, config)
+    return session, writer
 
 
 LIMITS_KW = dict(
@@ -225,47 +202,8 @@ def load_manifest(writer):
     ]
 
 
-def test_ladder_run_layout(modules, tmp_path):
-    session, writer, pauses = make_session(modules, tmp_path)
-    limits = modules.coordinates.Bounds3D(**LIMITS_KW)
-
-    records = session.run(limits)
-
-    # 2 ladder rungs x 1 shot + 2 Y-slices x (2 X-Z points x 1 shot)
-    assert len(records) == 2 + 4
-
-    run_dir = writer.run_dir
-
-    # Ladder backgrounds: one file per rung, tagged by exposure.
-    background_files = sorted(
-        p.name for p in (run_dir / "background").glob("*.npy")
-    )
-    assert len(background_files) == 2
-    assert any("exp0000100.0us" in name for name in background_files)
-    assert any("exp0001000.0us" in name for name in background_files)
-
-    # Per-slice folders named from the distance along the beam: measured
-    # 1000 mm at machine Y=20, so Y=20 -> y0100.00cm and Y=30 -> y0101.00cm.
-    for y_name in ("y0100.00cm", "y0101.00cm"):
-        slice_dir = run_dir / y_name
-        assert slice_dir.is_dir(), f"missing {y_name}"
-        assert len(list(slice_dir.glob("*.npy"))) == 2
-        assert (slice_dir / "frames.jsonl").exists()
-
-        calibration = json.loads(
-            (slice_dir / "calibration_result.json").read_text()
-        )
-        assert calibration["Converged"] is True
-        assert calibration["MeasuredFrom"] == "axicon3"
-
-    assert (run_dir / "auto_scan_setup.json").exists()
-    assert len(pauses) == 2
-    assert "BLOCK" in pauses[0]
-    assert "UNBLOCK" in pauses[1]
-
-
 def test_scan_frames_record_exposure_scan_kind_and_machine_y(modules, tmp_path):
-    session, writer, _ = make_session(modules, tmp_path)
+    session, writer = make_session(modules, tmp_path)
     limits = modules.coordinates.Bounds3D(**LIMITS_KW)
 
     session.run(limits)
@@ -289,7 +227,7 @@ def test_scan_frames_record_exposure_scan_kind_and_machine_y(modules, tmp_path):
 
 
 def test_fixed_raster_writes_raster_metadata(modules, tmp_path):
-    session, writer, _ = make_session(modules, tmp_path, background_mode="none")
+    session, writer = make_session(modules, tmp_path, background_mode="none")
     limits = modules.coordinates.Bounds3D(**LIMITS_KW)
 
     session.run(limits)
@@ -313,14 +251,14 @@ def test_fixed_raster_writes_raster_metadata(modules, tmp_path):
 
 
 def test_offaxis_background_position_defaults_to_farthest_corner(modules, tmp_path):
-    session, _, _ = make_session(modules, tmp_path, background_mode="offaxis")
+    session, _ = make_session(modules, tmp_path, background_mode="offaxis")
     limits = modules.coordinates.Bounds3D(**LIMITS_KW)
 
     assert session.background_xz(limits) == EXPECTED_BG_CORNER
 
 
 def test_offaxis_background_position_honors_explicit_config(modules, tmp_path):
-    session, _, _ = make_session(
+    session, _ = make_session(
         modules,
         tmp_path,
         background_mode="offaxis",
@@ -356,15 +294,13 @@ def test_descending_y_scan_walks_downward_with_correct_beam_y(
     # at Y-START, so folders still name the true distance from the optic.
     import dataclasses
 
-    session, writer, pauses = make_session(
+    session, writer = make_session(
         modules, tmp_path, background_mode="none"
     )
     config = dataclasses.replace(
         session.config, YStart_machine_mm=30.0, YStop_machine_mm=20.0
     )
-    session = modules.auto_scan.AutoScanSession(
-        writer, config, pause_fn=pauses.append
-    )
+    session = modules.auto_scan.AutoScanSession(writer, config)
     limits = modules.coordinates.Bounds3D(**LIMITS_KW)
 
     session.run(limits)
@@ -385,16 +321,15 @@ def test_descending_y_scan_walks_downward_with_correct_beam_y(
 
 
 def test_offaxis_run_puts_matched_backgrounds_in_each_slice_folder(modules, tmp_path):
-    session, writer, pauses = make_session(
+    session, writer = make_session(
         modules, tmp_path, background_mode="offaxis"
     )
     limits = modules.coordinates.Bounds3D(**LIMITS_KW)
 
     records = session.run(limits)
 
-    # 2 slices x (1 background shot + 2 X-Z points); no ladder, no prompts.
+    # 2 slices x (1 background shot + 2 X-Z points).
     assert len(records) == 6
-    assert pauses == []
     assert not (writer.run_dir / "background").exists()
 
     manifest = load_manifest(writer)
@@ -436,13 +371,12 @@ def test_offaxis_run_puts_matched_backgrounds_in_each_slice_folder(modules, tmp_
 
 
 def test_background_mode_none_skips_all_backgrounds(modules, tmp_path):
-    session, writer, pauses = make_session(modules, tmp_path, background_mode="none")
+    session, writer = make_session(modules, tmp_path, background_mode="none")
     limits = modules.coordinates.Bounds3D(**LIMITS_KW)
 
     records = session.run(limits)
 
     assert len(records) == 4  # scans only
-    assert pauses == []
     assert all(
         r["Extra"]["ScanKind"] == "AutoBeamStack" for r in load_manifest(writer)
     )
@@ -451,7 +385,7 @@ def test_background_mode_none_skips_all_backgrounds(modules, tmp_path):
 def test_background_reused_when_exposure_stable(modules, tmp_path):
     # Both slices calibrate to the same exposure -> the second slice reuses
     # the first slice's background instead of driving to the corner again.
-    session, writer, _ = make_session(
+    session, writer = make_session(
         modules,
         tmp_path,
         background_mode="offaxis",
@@ -505,7 +439,7 @@ def test_background_recaptured_when_exposure_changes(modules, tmp_path):
         dim(), bright(), bright(), bright(), bright(),  # slice 2: calib x2, bg, 2 scans
     ]
 
-    session, writer, _ = make_session(
+    session, writer = make_session(
         modules,
         tmp_path,
         images=images,
@@ -556,7 +490,7 @@ def test_adaptive_raster_single_frame_beam_end_to_end(modules, tmp_path):
     for _ in range(2):  # two slices
         images.extend([calibration_frame(), dark_frame(), blob_frame()])
 
-    session, writer, _ = make_session(
+    session, writer = make_session(
         modules,
         tmp_path,
         images=images,
@@ -662,16 +596,16 @@ def test_dark_perimeter_frames_are_relabeled_on_disk(modules, tmp_path):
 
 
 def test_calibration_seeds_next_slice_from_previous_exposure(modules, tmp_path):
-    session, writer, _ = make_session(modules, tmp_path)
+    session, writer = make_session(modules, tmp_path)
     limits = modules.coordinates.Bounds3D(**LIMITS_KW)
 
     session.run(limits)
 
     exposure_node = writer.cam.ExposureTime
 
-    # Ladder rungs first (100, 1000), then one calibration set per slice;
-    # the second slice's seed equals the first slice's converged exposure.
-    calibration_sets = exposure_node.set_calls[2:]
+    # One calibration set per slice; the second slice's seed equals the
+    # first slice's converged exposure.
+    calibration_sets = exposure_node.set_calls
     assert len(calibration_sets) == 2
     assert calibration_sets[0] == calibration_sets[1]
 
@@ -691,7 +625,7 @@ def test_follow_beam_moves_calibration_to_brightest_cell(modules, tmp_path):
         frame(150), frame(150),  # slice 2 scan points
     ]
 
-    session, writer, _ = make_session(
+    session, writer = make_session(
         modules, tmp_path, images=images, background_mode="none"
     )
     limits = modules.coordinates.Bounds3D(**LIMITS_KW)
@@ -729,7 +663,7 @@ def test_follow_beam_disabled_keeps_configured_point(modules, tmp_path):
 
     import dataclasses
 
-    session, writer, _ = make_session(
+    session, writer = make_session(
         modules, tmp_path, images=images, background_mode="none"
     )
     session.config = dataclasses.replace(session.config, FollowBeam=False)
@@ -851,7 +785,7 @@ def test_find_beam_rejects_flat_ambient_and_escalates_exposure(modules, tmp_path
 
 
 def test_find_beam_engages_only_without_explicit_calibration_point(modules, tmp_path):
-    session, _, _ = make_session(modules, tmp_path, find_beam=True)
+    session, _ = make_session(modules, tmp_path, find_beam=True)
     assert session._need_find_beam is True  # no explicit point given
 
     import dataclasses
@@ -896,20 +830,20 @@ def test_beam_direction_default_matches_hardware_verification(modules, tmp_path)
 
 
 def test_session_wires_restore_state_hook(modules, tmp_path):
-    session, writer, _ = make_session(modules, tmp_path)
+    session, writer = make_session(modules, tmp_path)
 
     assert writer.RestoreState == session._restore_camera_state
 
 
 def test_restore_reapplies_last_deliberate_exposure(modules, tmp_path):
-    session, writer, _ = make_session(modules, tmp_path)
+    session, writer = make_session(modules, tmp_path)
 
     # No exposure deliberately set yet: restore must be a no-op.
     writer.cam.ExposureTime.SetValue(25.0)
     session._restore_camera_state()
     assert writer.cam.ExposureTime.GetValue() == 25.0
 
-    # After a deliberate set (as calibration / find-beam / ladder do)...
+    # After a deliberate set (as calibration / find-beam do)...
     session._set_exposure(1234.0)
     assert writer.cam.ExposureTime.GetValue() == 1234.0
 

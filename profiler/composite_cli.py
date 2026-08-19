@@ -1,8 +1,7 @@
 """
 `dataset composite` — place one slice's frames at their commanded gantry
-positions and average the overlaps. The position-based counterpart of
-`dataset stitch` (registration-based, for legacy manual scans); use this
-one for gantry runs — it handles the adaptive raster's dark perimeter
+positions and average the overlaps. Position-based rather than
+registration-based, so it handles the adaptive raster's dark perimeter
 frames that registration cannot.
 
 Accepts any mix of slice folders, run folders, and glob patterns (a

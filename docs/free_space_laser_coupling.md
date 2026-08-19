@@ -1,9 +1,9 @@
 
 Procedure to align and couple a laser diode to single-mode polarization-maintaining (PM) fiber optic cable
 
-Laser diode: CPS650F (elliptical beam shape)
+Laser diode: CPS650F (elliptical beam shape), nominal wavelength = 650nm
 Coupler: Kirchoff 60SMS
-Fiber: P3 630PM-FC-1 patch cable
+Fiber: Single mode fiber patch cable rated for 650nm. Do NOT use polarization-maintaining (PM) fiber.
 
 1. Roughly collimate laser diode by twisting focus knob on laser diode.
 2. Restore all mirrors to a neutral position by twisting adjustment knobs.
@@ -23,3 +23,4 @@ Fiber: P3 630PM-FC-1 patch cable
    
 8. (If needed) Adjust the focus Kirchoff 60SMS fiber coupler. See "3.2 Changing the focus setting" in `datasheets/Adjustment_60SMS.pdf`. Note: locking the adjustment screws (see Figure 12) in the final step can result in signal loss, because the grub screws are not mechanically isolated.
 
+Expect 1.2 - 2.0 mW after fiber is coupled to CPS650F diode laser.
