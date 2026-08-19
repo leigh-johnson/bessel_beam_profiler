@@ -99,23 +99,6 @@ def test_explicit_subfolder_groups_frames_and_manifests(modules, tmp_path):
     assert json.loads(root_lines[0]) == json.loads(sub_lines[0])
 
 
-def test_group_by_y_config_flag_names_subfolder_from_table_y(modules, tmp_path):
-    arr = np.zeros((2, 2), dtype=np.uint8)
-    writer = make_writer(
-        modules,
-        tmp_path,
-        images=[FakeImage(arr)],
-        GroupByYSubfolder=True,
-    )
-
-    records = writer.acquire_scan([make_point(modules, beam_y_mm=1000.0)])
-
-    assert (
-        modules.dataset_writer.Path(records[0].Path).parent
-        == writer.run_dir / "y_p001000.000mm"
-    )
-
-
 def test_no_subfolder_by_default(modules, tmp_path):
     arr = np.zeros((2, 2), dtype=np.uint8)
     writer = make_writer(modules, tmp_path, images=[FakeImage(arr)])

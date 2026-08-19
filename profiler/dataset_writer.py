@@ -55,12 +55,6 @@ class DatasetWriterConfig:
     # We can encode to BMP or PNG later, but want to avoid any lossy compression at this stage.
     ImageExtension: str = ".npy"
 
-    # Group frames into per-slice subfolders of the run directory (named
-    # from TablePosition_mm.y_mm, the distance along the beam) when no
-    # explicit Metadata["Subfolder"] is set. Coordinate convention:
-    # X horizontal transverse, Y beam propagation, Z vertical.
-    GroupByYSubfolder: bool = False
-
     # Optional label appended to the run directory name after the
     # timestamp (e.g. the --optic under alignment):
     # align-2026-08-03_18-51-47_axicon1. Sanitized to filename-safe
@@ -713,20 +707,13 @@ class FLIRDatasetWriter(FLIRCameraControllerBase):
         """
         Directory a point's frames are saved in.
 
-        Frames are grouped into a per-position subfolder of the run
-        directory when either:
-
-            * point.Metadata["Subfolder"] names one explicitly (used by the
-              auto scan for beam-position folders), or
-            * config.GroupByYSubfolder is set, in which case the table
-              y-position (distance along the beam) is used,
-              e.g. "y_p001000.000mm/".
+        Frames land in a per-position subfolder of the run directory when
+        point.Metadata["Subfolder"] names one (the auto scan uses this for
+        its beam-position folders); otherwise they go in the run directory
+        itself.
         """
 
         name = (point.Metadata or {}).get("Subfolder")
-
-        if not name and self.config.GroupByYSubfolder:
-            name = f"y_{_format_mm(point.TablePosition_mm.y_mm)}"
 
         if not name:
             return self.run_dir
