@@ -644,3 +644,26 @@ def test_wait_until_idle_still_raises_immediately_on_alarm_after_blackout():
 
     with pytest.raises(FluidNCAlarmError):
         client.wait_until_idle(timeout_s=5.0)
+
+
+# ---------------------------------------------------------------------------
+# Runtime config-set + jog line formats
+# ---------------------------------------------------------------------------
+
+
+def test_set_config_value_line_format():
+    client, transport = make_client()
+
+    client.set_config_value("axes/z/max_travel_mm", "85.500")
+
+    assert transport.sent[-1] == b"$/axes/z/max_travel_mm=85.500\n"
+
+
+def test_jog_incremental_line_format_and_wait():
+    client, transport = make_client()
+    transport.status_reports.append("<Idle|MPos:60.000,80.000,-50.000|FS:0,0>")
+
+    client.jog_incremental("z", -2.5, feed_mm_min=150.0)
+
+    assert transport.sent[0] == b"$J=G91 Z-2.500 F150.0\n"
+    assert transport.sent[-1] == b"?"  # waited for idle

@@ -567,6 +567,10 @@ class FLIRDatasetWriter(FLIRCameraControllerBase):
         - Lost GVSP packets deliver an INCOMPLETE image (e.g. status 3,
           missing packets). The frame data has holes, so it is released
           and re-triggered rather than saved.
+
+        A bus removal (-1024) is NOT retried here: the camera object is
+        invalid, so it is re-raised for the mid-shot recovery ladder to
+        reconnect.
         """
     
         attempt = 0
@@ -579,6 +583,14 @@ class FLIRDatasetWriter(FLIRCameraControllerBase):
                     self.config.AcquisitionTimeout_ms
                 )
             except PySpin.SpinnakerException as ex:
+                # A bus removal (-1024) invalidates the camera object
+                # itself, so re-triggering it can never succeed — it just
+                # burns the retry budget (and its pauses) before failing.
+                # Hand it straight to the mid-shot recovery ladder, whose
+                # -1024 branch reconnects and then retries the shot.
+                if self._is_camera_removed_error(ex):
+                    raise
+
                 logger.warning("Attempting to re-trigger after GetNextImage failure: %s", ex)
                 if attempt < retries:
                     attempt += 1
