@@ -759,7 +759,7 @@ class FLIRDatasetWriter(FLIRCameraControllerBase):
 
         # Frames grouped into a subfolder also get a local frames.jsonl so
         # each z-position folder is self-contained (e.g. for per-z
-        # stitching with stitcher.stitch_run_dir on the subfolder).
+        # compositing with composite.composite_slice on the subfolder).
         parent = Path(record.Path).parent
 
         if parent != self.run_dir:

@@ -353,21 +353,6 @@ def static(
     help="Extra manifest metadata as KEY=VALUE. May be repeated.",
 )
 @click.option(
-    "--stitch/--no-stitch",
-    "do_stitch",
-    default=True,
-    show_default=True,
-    help="Stitch saved frames into a composite image when the session ends.",
-)
-@click.option(
-    "--stitch-method",
-    default="auto",
-    show_default=True,
-    type=click.Choice(["auto", "phase", "opencv"]),
-    help="Registration method: FFT phase correlation, OpenCV ORB features, "
-    "or auto (phase correlation with OpenCV fallback).",
-)
-@click.option(
     "--calibration-dir",
     default=Path("calibrations"),
     show_default=True,
@@ -384,8 +369,6 @@ def manual(
     preview_interval_s: float,
     colormap: str,
     metadata: tuple[str, ...],
-    do_stitch: bool,
-    stitch_method: str,
     calibration_dir: Path,
 ) -> None:
     """
@@ -395,8 +378,7 @@ def manual(
     and reference optic, (3) interactive exposure calibration saved to
     --calibration-dir, then (4) the XY scan itself using the calibrated
     settings. Press SPACE to save the current frame, move the stage by hand,
-    and save again; press q (or close the window) to finish. Saved frames are
-    then stitched into a composite.
+    and save again; press q (or close the window) to finish.
     """
 
     from dataclasses import replace
@@ -518,7 +500,7 @@ def manual(
     records = session.run()
 
     # PySpin system.ReleaseInstance() will raise if anything still holds a
-    # camera reference; drop the writer before doing CPU-only stitching.
+    # camera reference; drop the writer before the process exits.
     del session
     del writer
 
@@ -527,71 +509,3 @@ def manual(
 
     for record in records:
         click.echo(record.Path)
-
-    if not do_stitch:
-        return
-
-    if len(records) < 2:
-        click.echo("Fewer than two frames saved; skipping stitching.")
-        return
-
-    from stitcher import StitchConfig, stitch_run_dir
-
-    click.echo("Stitching composite image...")
-
-    outputs = stitch_run_dir(
-        run_dir,
-        StitchConfig(Method=stitch_method, Colormap=colormap),
-    )
-
-    click.echo(f"Composite image: {outputs['png']}")
-    click.echo(f"Composite array: {outputs['npy']}")
-    click.echo(f"Offsets:         {outputs['offsets']}")
-
-
-@dataset.command("stitch")
-@click.argument(
-    "run_dir",
-    type=click.Path(exists=True, file_okay=False, path_type=Path),
-)
-@click.option(
-    "--method",
-    default="auto",
-    show_default=True,
-    type=click.Choice(["auto", "phase", "opencv"]),
-    help="Registration method: FFT phase correlation, OpenCV ORB features, "
-    "or auto (phase correlation with OpenCV fallback).",
-)
-@click.option(
-    "--output-stem",
-    default="composite",
-    show_default=True,
-    help="Filename stem for the composite outputs written into RUN_DIR.",
-)
-@click.option(
-    "--colormap",
-    default="inferno",
-    show_default=True,
-    help="Matplotlib colormap for the composite PNG.",
-)
-def stitch(run_dir: Path, method: str, output_stem: str, colormap: str) -> None:
-    """
-    (Re-)stitch the frames of an existing run directory into a composite.
-
-    Reads acquisition order from frames.jsonl when present, otherwise all
-    *.npy files in sorted filename order. No camera required.
-    """
-
-    from stitcher import StitchConfig, stitch_run_dir
-
-    add_file_log(run_dir / "scan.log")
-
-    outputs = stitch_run_dir(
-        run_dir,
-        StitchConfig(Method=method, Colormap=colormap),
-        output_stem=output_stem,
-    )
-
-    click.echo(f"Composite image: {outputs['png']}")
-    click.echo(f"Composite array: {outputs['npy']}")
-    click.echo(f"Offsets:         {outputs['offsets']}")

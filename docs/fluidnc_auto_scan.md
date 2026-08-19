@@ -168,7 +168,7 @@ data/auto_scan-2026-07-22_14-01-05/        # one run dir per placement
         frames.jsonl
         placement-01-exp0000100.0us-...-shot0000.npy  (+ .jpg)
     y0100.00cm/                            # distance along the beam
-        frames.jsonl                       # per-slice manifest (stitchable)
+        frames.jsonl                       # per-slice manifest (compositable)
         calibration_result.json            # exposure, max, converged
         calibrated_camera_settings.json
         raster_metadata.json               # grid, growth history, edge stops,
@@ -198,7 +198,7 @@ The CLI configures Python logging at INFO by default (`--log-level` on the
 top-level `cli` group changes it). All scan progress — slice headers,
 calibration results, background capture/reuse decisions, adaptive-raster
 growth and truncation warnings — goes through `logging`, so the dataset
-subcommands (`auto`, `static`, `manual`, `stitch`) mirror everything into
+subcommands (`auto`, `static`, `manual`) mirror everything into
 a timestamped `scan.log` inside the run directory, next to the data it
 describes. For `dataset auto`, each placement's run directory gets its own
 scan.log (the handler swaps when a new placement starts). Interactive

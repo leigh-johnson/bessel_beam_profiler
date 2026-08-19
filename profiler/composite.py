@@ -1,12 +1,11 @@
 """
 Position-based compositing of one slice's X-Z raster into a single image.
 
-Unlike stitcher.py (image-registration based, built for the manual stage
-where positions were unknown), gantry scans record the commanded machine
-position of every frame — so each frame is simply PLACED at its known
-coordinates and overlaps are averaged. This works on frames registration
-cannot handle (mostly-dark, featureless, or empty proof-of-darkness
-perimeter frames from the adaptive raster).
+Gantry scans record the commanded machine position of every frame, so
+each frame is simply PLACED at its known coordinates and overlaps are
+averaged. This works on frames image registration cannot handle
+(mostly-dark, featureless, or empty proof-of-darkness perimeter frames
+from the adaptive raster).
 
 Geometry: machine X (horizontal transverse) maps to composite columns
 (+X right), machine Z (vertical) to rows (+Z up). Default image-axis

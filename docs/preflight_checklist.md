@@ -103,5 +103,5 @@ Then inspect the run directory:
 * Adaptive raster's `any` border test may overshoot the beam by ~1 frame
   per side (orientation-safe). After verifying the image↔machine axis
   mapping, `BorderTest="directional"` removes it.
-* Stitching is a separate step (`dataset stitch <run>/y0100.00cm`) and
-  still uses image registration, not commanded positions.
+* Compositing is a separate step (`dataset composite <run>/y0100.00cm`),
+  which places frames at their commanded positions.

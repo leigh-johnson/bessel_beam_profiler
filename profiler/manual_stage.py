@@ -18,10 +18,6 @@ gantry scans — the only differences are ScanKind="ManualStage" and a
 MoveIndex counter in the Extra metadata (per your note, no coordinates are
 tracked between moves).
 
-After the session, the frames can be stitched into a composite image with
-stitcher.stitch_run_dir (the CLI does this automatically unless --no-stitch
-is passed).
-
 This module deliberately avoids importing PySpin so that it can be unit
 tested against a fake writer/camera.
 """
