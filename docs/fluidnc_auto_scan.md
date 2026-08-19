@@ -93,10 +93,11 @@ Workflow per placement (repeats for as many placements as you want):
   (all four border strips of the seed frame are dark). The raster lattice
   is generic 2D; in this scan its axes map to lattice-x = machine X,
   lattice-y = machine Z (recorded as `LatticeAxes` in the metadata). The
-  default border test (`any`) is orientation-independent and may overshoot
-  the beam extent by ~1 frame per side; once you've verified how image
-  axes map to machine axes, `BorderTest="directional"` in `AutoScanConfig`
-  (with `ImageTranspose`/`ImageFlipX`/`ImageFlipY`) removes the overshoot.
+  border test is orientation-independent — a frame counts as having border
+  signal if ANY of its four strips does — so it needs no image↔machine axis
+  mapping, at the cost of overshooting the beam extent by ~1 frame per
+  side. Those surplus frames are dark on every strip, so they are labeled
+  `-dark` and excluded from composites by default.
 * `fixed`: always raster the full X × Z grid.
 
 Ring-beam safeguards (all on by default):

@@ -19,17 +19,14 @@ sized for the worst case, this runner:
 If the beam fits entirely inside the seed frame (all four border strips
 dark), the raster is complete after ONE frame.
 
-Border test modes:
+Border test:
 
-    "any" (default): a frame "has signal at its border" if ANY of its four
-        border strips does. Orientation-independent — it does not matter
-        how the camera's image axes map to machine axes — at the cost of
-        overshooting the beam extent by up to ~1 frame per direction.
-    "directional": only the strip facing the growth direction is tested,
-        using the ImageTranspose / ImageFlipX / ImageFlipY mapping. More
-        efficient, but you MUST verify the mapping once on hardware first
-        (jog +X with the beam visible and note which way it moves in the
-        image); a wrong mapping silently truncates coverage.
+A frame "has signal at its border" if ANY of its four border strips does,
+and that one answer drives growth in all four directions. This is
+orientation-independent — it does not matter how the camera's image axes
+map to machine axes — at the cost of overshooting the beam extent by up
+to ~1 frame per direction. Those surplus frames are dark on every strip,
+so they are labeled and excluded from composites by default.
 
 The runner is decoupled from the camera and gantry: it drives a capture
 callback and reads back NumPy arrays, so it is unit tested against a
@@ -76,7 +73,6 @@ class AdaptiveRasterConfig:
     # Border strip width as a fraction of the frame dimension.
     BorderStripFraction: float = 0.15
 
-    BorderTest: str = "any"  # "any" | "directional"
 
     # If the SEED frame contains no signal (e.g. the seed landed in the
     # dark interior of a ring beam), grow in all directions for up to this
@@ -84,11 +80,6 @@ class AdaptiveRasterConfig:
     # signal, the normal edge rule takes over; if nothing is found the
     # raster stops and reports BeamFound=false.
     BlindProbePasses: int = 2
-
-    # Image-axis -> machine-axis mapping, used only by "directional".
-    ImageTranspose: bool = False
-    ImageFlipX: bool = False
-    ImageFlipY: bool = False
 
 
 @dataclass
@@ -133,36 +124,12 @@ def border_strips(
     }
 
 
-def _machine_side_to_array_strip(side: str, config: AdaptiveRasterConfig) -> str:
-    """
-    Map a machine-frame side (+x/-x/+y/-y) to an array border strip name,
-    honoring transpose/flip configuration. Used by "directional" mode.
-    """
-
-    # Without transpose: machine x -> array columns, machine y -> array rows.
-    axis_is_cols = (side in ("+x", "-x")) != config.ImageTranspose
-    positive = side in ("+x", "+y")
-
-    flip = config.ImageFlipX if side in ("+x", "-x") else config.ImageFlipY
-    high_end = positive != flip
-
-    if axis_is_cols:
-        return "col1" if high_end else "col0"
-    return "row1" if high_end else "row0"
-
-
 class AdaptiveRasterRunner:
     def __init__(
         self,
         config: AdaptiveRasterConfig,
         capture_fn: CaptureFn,
     ):
-        if config.BorderTest not in ("any", "directional"):
-            raise AdaptiveRasterError(
-                f"Unknown BorderTest {config.BorderTest!r}; "
-                "use 'any' or 'directional'."
-            )
-
         self.config = config
         self.capture_fn = capture_fn
 
@@ -221,14 +188,8 @@ class AdaptiveRasterRunner:
             name: self._strip_has_signal(strip) for name, strip in strips.items()
         }
 
-        if self.config.BorderTest == "any":
-            any_signal = any(strip_signal.values())
-            return {side: any_signal for side in DIRECTIONS}
-
-        return {
-            side: strip_signal[_machine_side_to_array_strip(side, self.config)]
-            for side in DIRECTIONS
-        }
+        any_signal = any(strip_signal.values())
+        return {side: any_signal for side in DIRECTIONS}
 
     # -- capture -------------------------------------------------------
 
@@ -417,7 +378,6 @@ class AdaptiveRasterRunner:
             "SignalThreshold_counts": self.config.SignalThreshold_counts,
             "MinSignalPixels": self.config.MinSignalPixels,
             "BorderStripFraction": self.config.BorderStripFraction,
-            "BorderTest": self.config.BorderTest,
             "Iterations": iterations,
             "EdgeStops": edge_stops,
             "TruncatedSides": truncated_sides,

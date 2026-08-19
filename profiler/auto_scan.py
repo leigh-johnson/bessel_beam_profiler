@@ -104,16 +104,6 @@ class AutoScanConfig:
     MinSignalPixels: int = 50
     BorderStripFraction: float = 0.15
 
-    # "any" = orientation-independent border test (default, safe;
-    # overshoots the beam extent by <= ~1 frame per side). "directional"
-    # tests only the outward-facing strip and needs the image->machine axis
-    # mapping below verified once on hardware. In the raster lattice,
-    # lattice-x = machine X and lattice-y = machine Z.
-    BorderTest: str = "any"
-    ImageTranspose: bool = False
-    ImageFlipX: bool = False
-    ImageFlipY: bool = False
-
     # Signal threshold fallback when no per-slice background exists
     # (background mode "none").
     FallbackBackgroundP99_counts: float = 5.0
@@ -963,10 +953,6 @@ class AutoScanSession:
             SignalThreshold_counts=threshold,
             MinSignalPixels=self.config.MinSignalPixels,
             BorderStripFraction=self.config.BorderStripFraction,
-            BorderTest=self.config.BorderTest,
-            ImageTranspose=self.config.ImageTranspose,
-            ImageFlipX=self.config.ImageFlipX,
-            ImageFlipY=self.config.ImageFlipY,
         )
 
         def capture(x_mm: float, z_mm: float, i: int, j: int):

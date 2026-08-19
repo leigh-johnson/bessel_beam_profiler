@@ -99,8 +99,9 @@ Then inspect the run directory:
 ## Known limitations today
 
 * No auto-resume after a WiFi drop or crash — restart the placement.
-* Adaptive raster's `any` border test may overshoot the beam by ~1 frame
-  per side (orientation-safe). After verifying the image↔machine axis
-  mapping, `BorderTest="directional"` removes it.
+* Adaptive raster's border test may overshoot the beam by ~1 frame per
+  side. This is by design — it is orientation-safe, needing no image↔machine
+  axis mapping — and the surplus frames are labeled `-dark` and excluded
+  from composites.
 * Compositing is a separate step (`dataset composite <run>/y0100.00cm`),
   which places frames at their commanded positions.

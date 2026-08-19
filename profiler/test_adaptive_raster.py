@@ -17,7 +17,6 @@ from adaptive_raster import (
     AdaptiveRasterConfig,
     AdaptiveRasterError,
     AdaptiveRasterRunner,
-    _machine_side_to_array_strip,
     border_strips,
 )
 
@@ -211,13 +210,6 @@ def test_warns_when_min_signal_pixels_exceeds_strip_size(caplog):
     assert any("NEVER grow" in record.message for record in caplog.records)
 
 
-def test_rejects_unknown_border_test_mode():
-    with pytest.raises(AdaptiveRasterError, match="BorderTest"):
-        AdaptiveRasterRunner(
-            make_config(BorderTest="sideways"), SyntheticCamera(CENTER, 1.0)
-        )
-
-
 def test_center_outside_caps_is_an_error():
     runner = AdaptiveRasterRunner(
         make_config(XMin_mm=CENTER[0] + 10.0), SyntheticCamera(CENTER, 1.0)
@@ -274,43 +266,6 @@ def test_blind_probe_disabled_stops_at_dark_seed():
 
     assert result.Metadata["CellsCaptured"] == 1
     assert result.Metadata["BeamFound"] is False
-
-
-# ---------------------------------------------------------------------------
-# Directional border test
-# ---------------------------------------------------------------------------
-
-
-def test_directional_mode_grows_only_toward_the_beam():
-    beam_center = (CENTER[0] + 5.0, CENTER[1])
-    radius = 4.0
-
-    result, camera = run_raster(
-        beam_center, radius, BorderTest="directional"
-    )
-
-    captured = {(i, j) for (_, _, i, j) in camera.captured}
-    required = lattice_cells_with_signal(make_config(), beam_center, radius)
-
-    assert required <= captured
-    # Directional mode never probes the dark -x side beyond the seed column.
-    assert all(i >= 0 for (i, j) in captured)
-
-
-def test_machine_side_to_array_strip_mapping():
-    identity = make_config(BorderTest="directional")
-    assert _machine_side_to_array_strip("+x", identity) == "col1"
-    assert _machine_side_to_array_strip("-x", identity) == "col0"
-    assert _machine_side_to_array_strip("+y", identity) == "row1"
-    assert _machine_side_to_array_strip("-y", identity) == "row0"
-
-    flipped = make_config(BorderTest="directional", ImageFlipX=True)
-    assert _machine_side_to_array_strip("+x", flipped) == "col0"
-    assert _machine_side_to_array_strip("-x", flipped) == "col1"
-
-    transposed = make_config(BorderTest="directional", ImageTranspose=True)
-    assert _machine_side_to_array_strip("+x", transposed) == "row1"
-    assert _machine_side_to_array_strip("+y", transposed) == "col1"
 
 
 def test_border_strips_shapes():
