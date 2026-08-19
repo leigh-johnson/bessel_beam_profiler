@@ -207,12 +207,6 @@ def dataset() -> None:
     multiple=True,
     help="Extra manifest metadata as KEY=VALUE. May be repeated.",
 )
-@click.option(
-    "--force",
-    is_flag=True,
-    help="Force acquisition even if the camera is already streaming. "
-    "This may cause the camera to drop frames.",
-)
 def static(
     camera_settings_path: Path,
     dataset_root: Path,
@@ -229,7 +223,6 @@ def static(
     table_y_mm: float,
     table_z_mm: float,
     metadata: tuple[str, ...],
-    force: bool,
 ) -> None:
     """
     Acquire one or more images with a fixed/static camera.
