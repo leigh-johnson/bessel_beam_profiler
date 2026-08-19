@@ -1,32 +1,29 @@
 # Alignment
 
-Two halves of the same job: the **procedure** for aligning the cavity
-one optic at a time, and the reference for the **`align` CLI** that
-provides the live feedback each stage is signed off against.
-
-- [Staged alignment protocol](#staged-alignment-protocol) — what you
-  do at the bench, in order, and the sign-off thresholds.
-- [The `align` tool](#the-align-tool) — modes, metrics, keys, and
-  outputs.
+- [Staged alignment protocol](#staged-alignment-protocol) — the order
+  to align in, the commands, the sign-off thresholds.
+- [The `align` tool](#the-align-tool) — modes, metrics, keys, outputs.
 
 ## Staged alignment protocol
 
 One optic at a time. Sign off each stage before placing the next;
 after sign-off, never touch that stage's knobs again (if you must,
-re-run its check). Per stage, three DOFs → three sensors, in order:
+re-run its check). Per stage, two first-order camera signals, in
+order:
 
-1. **Incidence (tip/tilt)**: retro-reflect the axicon's flat face back
-   to an iris at the source. First-order in tilt (1 mrad = 2 mm at
-   1 m). Do NOT dial tilt against ring ellipticity — it's second-order
-   and hides degrees.
-2. **Centering (XZ)**: azimuthal uniformity — first-order; the bright
-   sector points along the decenter.
-3. **Axis straightness**: center vs machine Y. The gantry Y travel is
+1. **Centering (XZ)**: azimuthal uniformity — the bright sector points
+   along the decenter.
+2. **Axis straightness**: center vs machine Y. The gantry Y travel is
    the reference axis; slope = tilt, ladder residuals = rail wiggle.
+
+Incidence (tip/tilt) is not one of them. Ring ellipticity is
+second-order in tilt and hides degrees — don't dial tilt against it.
+The camera confirms incidence; it doesn't set it.
 
 ### Stage 1 — input beam
 
-No optics on the table yet.
+No optics on the table yet — [gaussian mode](#gaussian-input-mode) on
+a Y ladder:
 
 ```
 python cli.py align --mode gaussian --optic input --y 130 --y-stop 10 --planes 5
@@ -37,12 +34,9 @@ Ladder loops until `q`. Steer far mirror (angle) + near mirror
 both axes, residuals flat; record w0 and astigmatism (the 2×2 mosaic
 handles the beam overfilling the sensor).
 
-See [Gaussian input mode](#gaussian-input-mode) for what the mode
-measures and how the fits are logged.
-
 ### Stage 2 — axicon 1
 
-Retro-reflect first. Then center, at a plane in the L12 region:
+Center, at a plane in the L12 region:
 
 ```
 python cli.py align --mode patrol --optic axicon1 --y 20 --max-exposure 50000
@@ -50,7 +44,8 @@ python cli.py align --mode patrol --optic axicon1 --y 20 --max-exposure 50000
 
 Metrics refit live every station (~1–2 s). Dial uniformity modulation
 down; press `r` to zero, `--notes` the result. Then verify
-straightness + cone over two planes:
+straightness + [cone](#diverging-cones-eg-after-axicon-1) over two
+planes:
 
 ```
 python cli.py align --mode patrol --optic axicon1 --y 130 --y2 10 \
@@ -58,13 +53,12 @@ python cli.py align --mode patrol --optic axicon1 --y 130 --y2 10 \
 ```
 
 Sign-off: modulation < ~10%, center straight vs Y, cone ≈ 40.1 mrad
-(±few %). See [Diverging cones](#diverging-cones-eg-after-axicon-1)
-for the per-plane priors and what **cone** reads here.
+(±few %).
 
 ### Stage 3 — axicon 2
 
-Retro-reflect first. Center (same patrol command, `--optic axicon2`,
-one plane). Exit criterion — the annulus leaves COLLIMATED:
+Center (same patrol command, `--optic axicon2`, one plane). Exit
+criterion — the annulus leaves COLLIMATED:
 
 ```
 python cli.py align --mode patrol --optic axicon2 --y 130 --y2 10
@@ -72,12 +66,11 @@ python cli.py align --mode patrol --optic axicon2 --y 130 --y2 10
 
 Sign-off: cone ≈ 0 (±0.5 mrad), radius ≈ θ·L12, center straight.
 An uncollimated annulus here is what a railed kr reads like in
-stage 4. See [Other optics](#other-optics-eg-after-axicon-2) for the
-radius-vs-Y collimation check.
+stage 4.
 
 ### Stage 4 — axicon 3
 
-Retro-reflect first. Then core mode (default for axicon3):
+[Core mode](#core-mode), the default for axicon3:
 
 ```
 python cli.py align --optic axicon3 --y <core plane> --probe-x <x crossing the core>
@@ -88,9 +81,8 @@ of ideal, rms/A_fit < 0.01, zone extent ≈ z_max = w0/θ.
 **[FIT RAILED]** or rms/A ≫ 0.01 = the model doesn't apply at this
 plane (wrong plane / annulus light) — jog, don't turn knobs.
 
-See [Core mode](#core-mode) for the fit details, and
-[Focused Bessel region](#focused-bessel-region-after-axicon-3) if you
-are patrolling the compact spot rather than fitting the core.
+To patrol the spot instead of fitting the core, see
+[Focused Bessel region](#focused-bessel-region-after-axicon-3).
 
 ### Rules
 
@@ -120,9 +112,6 @@ python cli.py align --no-display --frames 100     # headless (SSH): log + PNGs o
 
 ### Modes
 
-(For where each mode fits in the staged procedure, see
-[Staged alignment protocol](#staged-alignment-protocol).)
-
 **stream** (default): after the bootstrap and ONE orbit lap, the gantry
 parks on the ring (brightest station, or `--park-azimuth`) and streams
 single frames at a few Hz with no motion. Each frame's arc is fit with
@@ -134,12 +123,12 @@ uniformity and re-parks; `f` re-runs the find-beam bootstrap.
 
 **patrol**: orbit continuously; every lap refreshes ALL metrics
 (~10–20 s feedback latency, full-ring truth every time). Required for
-the two-plane tilt readout (`--y2`). Used in
-[stage 2](#stage-2--axicon-1) and [stage 3](#stage-3--axicon-2).
+the two-plane tilt readout (`--y2`); [stage 2](#stage-2--axicon-1) and
+[stage 3](#stage-3--axicon-2) both use it.
 
 **core** (default when `--optic` is axicon3): parked native-resolution
-streaming of the Bessel core with live J0² fits — see
-[Core mode](#core-mode). This is [stage 4](#stage-4--axicon-3).
+streaming of the Bessel core with live J0² fits —
+[stage 4](#stage-4--axicon-3); see [Core mode](#core-mode).
 
 **free**: no bootstrap, no fitting — a live camera view with keyboard
 X/Y/Z jogging from the preview window or the terminal — see
@@ -271,10 +260,6 @@ The knob loop, fastest first:
 - Keep the live loop at ONE plane with `--cover ring` and 6-8
   stations. Save `--mode patrol --y2 --cover disk` for the
   before/after survey passes — the Y transit is most of their cost.
-- Incidence (tip/tilt) should not be dialed against camera metrics at
-  all — ring ellipticity is second-order in tilt. Use the retro
-  reflection (see [the protocol's DOF order](#staged-alignment-protocol))
-  and let the camera confirm.
 
 In the composite, GRAY pixels mean "no station frame imaged here"
 (coverage gaps between the ring and fill bands) — only black/purple
@@ -351,8 +336,7 @@ The usual self-healing applies: consecutive lost frames re-run
 find-beam automatically, and a failed re-find backs off and keeps
 streaming.
 
-For the sign-off thresholds this mode feeds, see
-[Stage 4](#stage-4--axicon-3).
+Sign-off thresholds: [stage 4](#stage-4--axicon-3).
 
 ### Free-stream mode
 
