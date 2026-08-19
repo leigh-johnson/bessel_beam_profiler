@@ -39,7 +39,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace as dataclass_replace
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 import json
 import logging
 import time
@@ -57,22 +57,11 @@ from headless_calibration import (
 
 logger = logging.getLogger(__name__)
 
-BACKGROUND_SUBFOLDER = "background"
-
 # Filename suffix (before the extension) for the adaptive raster's
 # no-signal frames — the proof-of-darkness perimeter. They stay in the
 # dataset (they document why growth stopped) but are visibly labeled and
 # excluded from composites by default.
 DARK_FRAME_SUFFIX = "-dark"
-
-
-def default_background_ladder_us(
-    min_us: float = 25.0,
-    max_us: float = 100_000.0,
-    count: int = 10,
-) -> tuple[float, ...]:
-    """Log-spaced exposure ladder covering the calibration range."""
-    return tuple(float(v) for v in np.geomspace(min_us, max_us, count))
 
 
 @dataclass(frozen=True)
@@ -126,7 +115,7 @@ class AutoScanConfig:
     ImageFlipY: bool = False
 
     # Signal threshold fallback when no per-slice background exists
-    # (background mode "ladder" or "none").
+    # (background mode "none").
     FallbackBackgroundP99_counts: float = 5.0
 
     # Where the camera sits during exposure calibration (beam core), in
@@ -166,8 +155,6 @@ class AutoScanConfig:
     #       the camera moves to an X/Z position outside the beam and
     #       captures backgrounds at that slice's calibrated exposure —
     #       exact exposure match, drift tracking, no manual beam blocking.
-    #   "ladder": once per placement, you block the beam when prompted and
-    #       a log-spaced exposure ladder is captured.
     #   "none": no backgrounds (quick alignment runs).
     BackgroundMode: str = "offaxis"
 
@@ -182,9 +169,6 @@ class AutoScanConfig:
     # refresh). Slices that reuse an earlier background record it in their
     # background_reference.json. 0.0 = capture at every slice.
     BackgroundExposureChangeFraction: float = 0.10
-
-    # Ladder mode only: exposures for the beam-blocked ladder.
-    BackgroundExposures_us: tuple[float, ...] = ()
 
     BackgroundShots: int = 3
 
@@ -328,12 +312,10 @@ class AutoScanSession:
         writer,  # FLIRDatasetWriter
         config: AutoScanConfig,
         calibration_config: HeadlessCalibrationConfig = HeadlessCalibrationConfig(),
-        pause_fn: Callable[[str], None] = None,
     ):
         self.writer = writer
         self.config = config
         self.calibration_config = calibration_config
-        self.pause_fn = pause_fn or (lambda message: input(f"{message}\nPress ENTER... "))
 
         self.records = []
         self.calibrations: dict[str, HeadlessCalibrationResult] = {}
@@ -584,51 +566,6 @@ class AutoScanSession:
         (slice_dir / "background_reference.json").write_text(
             json.dumps(payload, indent=2) + "\n"
         )
-
-    # -- ladder mode: beam-blocked backgrounds, once per placement -----
-
-    def capture_background_ladder(self) -> list:
-        exposures = self.config.BackgroundExposures_us or default_background_ladder_us()
-
-        calib_x, calib_z = self.config.calibration_xz()
-        self._move_to(calib_x, self.config.YStart_machine_mm, calib_z)
-
-        self.pause_fn(
-            "BLOCK THE BEAM now (backgrounds for this placement are about to "
-            f"be captured at {len(exposures)} exposures)."
-        )
-
-        records = []
-
-        for rung_idx, exposure_us in enumerate(exposures):
-            actual_us = self._set_exposure(exposure_us)
-
-            point = self._make_point(
-                calib_x,
-                self.config.YStart_machine_mm,
-                calib_z,
-                nshots=self.config.BackgroundShots,
-                metadata={
-                    "ScanKind": "Background",
-                    "Subfolder": BACKGROUND_SUBFOLDER,
-                    "FileTag": f"exp{actual_us:09.1f}us",
-                    "Exposure_us": actual_us,
-                    "LadderIndex": rung_idx,
-                    "MeasuredFrom": self.config.MeasuredFrom,
-                    **self.config.Metadata,
-                },
-            )
-
-            records.extend(self.writer.acquire_at_current_position(point))
-            logger.info(
-                f"background ladder {rung_idx + 1}/{len(exposures)}: "
-                f"{actual_us:.1f} us x {self.config.BackgroundShots} shots"
-            )
-
-        self.pause_fn("UNBLOCK THE BEAM now (backgrounds done).")
-
-        self.records.extend(records)
-        return records
 
     # -- beam finding ---------------------------------------------------
 
@@ -1209,15 +1146,6 @@ class AutoScanSession:
                 self.config.BackgroundExposureChangeFraction
             )
 
-        if self.config.BackgroundMode == "ladder":
-            setup["BackgroundExposures_us"] = list(
-                self.config.BackgroundExposures_us
-                or default_background_ladder_us()
-            )
-
         self.writer.write_json_artifact("auto_scan_setup.json", setup)
-
-        if self.config.BackgroundMode == "ladder":
-            self.capture_background_ladder()
 
         return self.run_y_stack(machine_limits)

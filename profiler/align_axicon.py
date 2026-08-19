@@ -831,7 +831,7 @@ class AxiconAlignSession:
                 FindBeam=True,
             )
 
-        self.inner = AutoScanSession(writer, scan_config, pause_fn=lambda m: None)
+        self.inner = AutoScanSession(writer, scan_config)
 
         # Per-Y-plane state (two planes when MachineY2_mm is set).
         self.estimates: dict[float, RingEstimate] = {}

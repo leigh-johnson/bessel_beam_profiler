@@ -148,11 +148,10 @@ def resolve_scan_caps(limits, x_min, x_max, z_min, z_max):
     "--background-mode",
     default="offaxis",
     show_default=True,
-    type=click.Choice(["offaxis", "ladder", "none"]),
+    type=click.Choice(["offaxis", "none"]),
     help="offaxis: per-slice ambient backgrounds with the camera parked "
     "outside the beam (in X/Z) at that slice's calibrated exposure (no "
-    "beam blocking). ladder: beam-blocked exposure ladder once per "
-    "placement. none: skip.",
+    "beam blocking). none: skip.",
 )
 @click.option("--background-x", "background_x_mm", default=None, type=float, help="Off-axis background X (machine mm). Default: farthest machine-limit X/Z corner.")
 @click.option("--background-z", "background_z_mm", default=None, type=float, help="Off-axis background Z (machine mm). Default: farthest machine-limit X/Z corner.")
@@ -167,9 +166,6 @@ def resolve_scan_caps(limits, x_min, x_max, z_min, z_max):
     "recorded in background_reference.json.",
 )
 @click.option("--background-shots", default=3, show_default=True, type=click.IntRange(min=1))
-@click.option("--background-min-us", default=25.0, show_default=True, type=float, help="Ladder mode only.")
-@click.option("--background-max-us", default=100000.0, show_default=True, type=float, help="Ladder mode only.")
-@click.option("--background-count", default=10, show_default=True, type=click.IntRange(min=2), help="Ladder mode only.")
 @click.option("--skip-background", is_flag=True, help="Shorthand for --background-mode none.")
 # -- notifications ----------------------------------------------------------
 @click.option(
@@ -247,9 +243,6 @@ def auto_scan(
     background_z_mm,
     background_exposure_change: float,
     background_shots: int,
-    background_min_us: float,
-    background_max_us: float,
-    background_count: int,
     skip_background: bool,
     slack_webhook,
     slack_bot_token,
@@ -265,11 +258,7 @@ def auto_scan(
     its own run directory with per-slice subfolders.
     """
 
-    from auto_scan import (
-        AutoScanConfig,
-        AutoScanSession,
-        default_background_ladder_us,
-    )
+    from auto_scan import AutoScanConfig, AutoScanSession
     from coordinates import AxisRange
     from dataset_writer import (
         DatasetWriterConfig,
@@ -358,14 +347,6 @@ def auto_scan(
 
     if skip_background:
         background_mode = "none"
-
-    background_ladder = (
-        default_background_ladder_us(
-            background_min_us, background_max_us, background_count
-        )
-        if background_mode == "ladder"
-        else ()
-    )
 
     from notify import slack_config_notice
 
@@ -473,7 +454,6 @@ def auto_scan(
                 BackgroundX_mm=background_x_mm,
                 BackgroundZ_mm=background_z_mm,
                 BackgroundExposureChangeFraction=background_exposure_change,
-                BackgroundExposures_us=background_ladder,
                 BackgroundShots=background_shots,
                 Metadata={
                     "OpticConfiguration": optic_config,
@@ -488,8 +468,6 @@ def auto_scan(
                 # Upper bound: slices whose exposure moved < the change
                 # threshold reuse the previous background.
                 n_background = f"up to {n_slices * background_shots}"
-            elif background_mode == "ladder":
-                n_background = str(len(background_ladder) * background_shots)
             else:
                 n_background = "0"
 
@@ -570,11 +548,7 @@ def auto_scan(
                     "affect the scan)."
                 )
 
-            session = AutoScanSession(
-                writer,
-                config,
-                pause_fn=lambda message: click.pause(f"\n>>> {message}\nPress any key when ready..."),
-            )
+            session = AutoScanSession(writer, config)
 
             # Everything logged during this placement (any module) also
             # lands in a scan.log next to the data.

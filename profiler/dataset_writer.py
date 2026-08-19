@@ -692,8 +692,8 @@ class FLIRDatasetWriter(FLIRCameraControllerBase):
 
     def _frame_path(self, point: ScanPoint, shot_idx: int) -> Path:
         # Optional filename tag to keep otherwise-identical points unique,
-        # e.g. the rungs of a background exposure ladder taken at one
-        # position (Metadata["FileTag"] = "exp000123.0us").
+        # e.g. the auto scan's off-axis backgrounds
+        # (Metadata["FileTag"] = "background").
         file_tag = (point.Metadata or {}).get("FileTag")
         tag_part = f"{_format_placement_id(str(file_tag))}-" if file_tag else ""
 
@@ -718,8 +718,7 @@ class FLIRDatasetWriter(FLIRCameraControllerBase):
         directory when either:
 
             * point.Metadata["Subfolder"] names one explicitly (used by the
-              auto scan for beam-position folders and the background
-              ladder), or
+              auto scan for beam-position folders), or
             * config.GroupByYSubfolder is set, in which case the table
               y-position (distance along the beam) is used,
               e.g. "y_p001000.000mm/".

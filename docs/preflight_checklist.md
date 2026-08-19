@@ -87,8 +87,7 @@ Then inspect the run directory:
 - [ ] At the dimmest slice's Y and exposure, compare a corner frame
       (beam ON) with one where you physically block the beam. If they
       match, the ambient-only assumption holds. If not, pick a different
-      `--background-x/--background-z`, or fall back to
-      `--background-mode ladder`.
+      `--background-x/--background-z`.
 
 ## 7. Full placement
 

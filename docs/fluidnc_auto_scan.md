@@ -149,11 +149,6 @@ stopped (`dark`/`cap`), the signal threshold and where it came from, and
   `background_reference.json` (which background frames apply, their
   exposure, the change fraction) — analysis should always resolve the
   background through that file rather than assuming one per folder.
-* `ladder`: once per placement, you block the beam when prompted and a
-  log-spaced exposure ladder is captured (default 10 rungs, 25 µs → 100 ms,
-  3 shots each) into `background/`. At analysis time subtract the rung
-  nearest each frame's exposure (or interpolate — background is ~linear in
-  exposure). Use this if the off-axis position can't be made beam-free.
 * `none` (or `--skip-background`): quick alignment runs.
 
 ## Output layout
@@ -164,9 +159,6 @@ data/auto_scan-2026-07-22_14-01-05/        # one run dir per placement
     auto_scan_setup.json                   # placement, ranges, convention
     camera_settings.json
     frames.jsonl                           # global manifest (all frames)
-    background/                            # ladder mode only
-        frames.jsonl
-        placement-01-exp0000100.0us-...-shot0000.npy  (+ .jpg)
     y0100.00cm/                            # distance along the beam
         frames.jsonl                       # per-slice manifest (compositable)
         calibration_result.json            # exposure, max, converged
@@ -189,8 +181,7 @@ Every frame's manifest record carries `Exposure_us`, `MachineY_mm`,
 (`AutoBeamStack` / `Background`; off-axis backgrounds also record
 `BackgroundMode: OffAxisAmbient` and their gantry position). In offaxis
 mode, subtraction is trivial: each slice folder resolves its own
-exposure-matched background through `background_reference.json`. In ladder
-mode, pick the rung nearest each frame's exposure or interpolate.
+exposure-matched background through `background_reference.json`.
 
 ## Logging
 
