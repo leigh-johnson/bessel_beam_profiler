@@ -1,5 +1,4 @@
-
-Procedure to align and couple a laser diode to single-mode polarization-maintaining (PM) fiber optic cable
+# Free-space laser diode → single-mode fiber alignment and coupling
 
 Laser diode: CPS650F (elliptical beam shape), nominal wavelength = 650nm
 Coupler: Kirchoff 60SMS

@@ -180,21 +180,19 @@ data/auto_scan-2026-07-22_14-01-05/        # one run dir per placement
 Every frame's manifest record carries `Exposure_us`, `MachineY_mm`,
 `BeamY_mm`, `MeasuredFrom`, and `ScanKind`
 (`AutoBeamStack` / `Background`; off-axis backgrounds also record
-`BackgroundMode: OffAxisAmbient` and their gantry position). In offaxis
-mode, subtraction is trivial: each slice folder resolves its own
-exposure-matched background through `background_reference.json`.
+`BackgroundMode: OffAxisAmbient` and their gantry position).
 
 ## Logging
 
 The CLI configures Python logging at INFO by default (`--log-level` on the
 top-level `cli` group changes it). All scan progress — slice headers,
 calibration results, background capture/reuse decisions, adaptive-raster
-growth and truncation warnings — goes through `logging`, so the dataset
-subcommands (`auto`, `static`, `manual`) mirror everything into
-a timestamped `scan.log` inside the run directory, next to the data it
-describes. For `dataset auto`, each placement's run directory gets its own
-scan.log (the handler swaps when a new placement starts). Interactive
-prompts and plan confirmations remain plain console output.
+growth and truncation warnings — goes through `logging`. The dataset
+subcommands (`auto`, `static`, `manual`) mirror it into a timestamped
+`scan.log` in the run directory. For `dataset auto`, each placement's
+run directory gets its own scan.log (the handler swaps when a new
+placement starts). Interactive prompts and plan confirmations remain
+plain console output.
 
 ## WiFi drop-offs and auto-reconnect
 
@@ -218,8 +216,8 @@ reconnects — those mean the link is fine.
 saved (filename, peak counts, timestamp). It runs as a SEPARATE process
 that tails the run directory — file reads only, never the camera — so it
 cannot slow, block, or crash the capture loop; closing the window has no
-effect on the scan. You can equivalently run it by hand, from a second
-terminal, at any time during or after a scan:
+effect on the scan. Same viewer by hand, from a second terminal,
+during or after a scan:
 
 ```
 python cli.py dataset watch                    # newest run under data/
