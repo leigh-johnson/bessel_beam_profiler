@@ -186,7 +186,7 @@ def home(host: str, port: int, axes: str) -> None:
 @_common_options
 @click.option("--x", "x_mm", type=float, default=None, help="Machine X target, mm.")
 @click.option("--y", "y_mm", type=float, default=None, help="Machine Y target, mm.")
-@click.option("--z", "z_mm", type=float, default=None, help="Machine Z target, mm (negative = toward the optics).")
+@click.option("--z", "z_mm", type=float, default=None, help="Machine Z target, mm.")
 @click.option("--feed", default=400.0, show_default=True, type=float, help="Feed, mm/min.")
 @click.option(
     "--unsafe",
