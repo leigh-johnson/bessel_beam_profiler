@@ -1,8 +1,10 @@
 # Morning preflight checklist — first hardware test of `dataset auto`
 
-Work top to bottom. Steps marked ⚙ are automated by `python cli.py
-preflight`; the rest are hands-on. Convention reminder: **X** horizontal
-transverse, **Y** along the beam, **Z** vertical; slices are X-Z rasters
+Steps marked ⚙ are automated by `python cli.py
+preflight`. All other steps are done manually. 
+
+Coordinate system: **X** horizontal
+transverse, **Y** along the beam propagation direction (Y1/Y2 are the ganged pair of stepper motors), **Z** vertical. Slices are X-Z rasters
 stepped along Y.
 
 ## 0. Before touching anything
