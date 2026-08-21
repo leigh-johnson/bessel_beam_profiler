@@ -14,21 +14,18 @@ The gantry's machine axes coincide with this frame after homing, so
 only in Y, where the per-placement measurement anchors machine Y to the
 beamline: `TableY = measured + BeamDirectionSign * (machineY − y-start)`.
 A beam cross-section is an **X-Z raster** at fixed machine Y; the scan
-**steps along Y**. There is no separate "beam frame" — the only derived
-quantity is the along-beam distance (`BeamY_mm`), which names the slice
-folders.
+**steps along Y**.
 
-`--beam-direction` sets the sign. **Verified on this rig 2026-07-22**
+`--beam-direction` sets the propagation sign. **Verified on this rig 2026-07-22**
 (preflight beam-direction check): machine +Y moves the camera TOWARD the
 optic, so the default is `-y` — stepping +Y along the stack means beam
 distance *decreases* from the measured start value. Re-verify (preflight
-`--motion`) if the gantry is ever re-oriented on the table.
+`--motion`) if the gantry is ever re-oriented on the table (for example, if the beam path is reflected at the END of the optics table).
 
 ## How G-code gets to FluidNC
 
-FluidNC speaks the plain-text GRBL protocol over a raw TCP socket on port
-23 (the Telnet server on `fluidnc-sr2.local` / 10.43.19.86 — same board the
-WebUI uses). `profiler/fluidnc_stage.py` wraps this:
+FluidNC (web ui: http://fluidnc-sr2.local) sends GRBL protocol over a raw TCP socket on port
+23 (the Telnet server on `fluidnc-sr2.local` / 10.43.19.86 same host as the web ui). `profiler/fluidnc_stage.py` wraps this:
 
 * Send a newline-terminated line (`$H`, `G53 G1 X60 Y80 Z-50 F400`), read
   `ok` / `error:N`.
@@ -61,8 +58,9 @@ python cli.py dataset auto --dataset-root data \
     --x-min 45 --x-max 75 --x-step 5 \
     --z-min -75 --z-max -45 --z-step 4
 ```
+The FLIR 31S4M camera has a resolution 2048 x 1536 (4:3 aspect ratio), so it's recommended to use an `--x-step` `--z-step` with a similar ratio. All stop/start/step values are in mm, with the smallest accepted step size ~0.06mm.
 
-Workflow per placement (repeats for as many placements as you want):
+Workflow per placement (repeats for as many placements as needed):
 
 1. Prompts for optic configuration and placement ID, then homes (`$H`).
 2. You measure the optic→sensor distance along the beam with the camera at
@@ -77,7 +75,7 @@ Workflow per placement (repeats for as many placements as you want):
 4. At the end you can move the gantry to a new placement; it re-homes and
    asks for a fresh distance measurement, and a new run directory begins.
 
-`Ctrl-C` sends a feed hold (`!`) to the gantry before exiting.
+`Ctrl-C` sends a feed hold (`!`) to the gantry before exiting. To release the feed hold, send `~` command to FluidNC via web ui, UART, or telnet. 
 
 ### Raster modes (`--raster`)
 
@@ -86,37 +84,26 @@ Workflow per placement (repeats for as many placements as you want):
   any direction whose edge frames still show signal in their border
   strips, referenced to this slice's own off-axis background
   (p99 + `--signal-margin` counts, at least `--min-signal-pixels` pixels).
-  It stops when all four edges are dark — or at the `--x/--z` ranges,
-  which act as the CAP; a cap stop is logged loudly and recorded as
-  `TruncatedSides` in the metadata, because it means the beam was cut off.
-  **A beam that fits inside one camera frame takes exactly one frame**
-  (all four border strips of the seed frame are dark). The raster lattice
-  is generic 2D; in this scan its axes map to lattice-x = machine X,
-  lattice-y = machine Z (recorded as `LatticeAxes` in the metadata). The
-  border test is orientation-independent — a frame counts as having border
-  signal if ANY of its four strips does — so it needs no image↔machine axis
-  mapping, at the cost of overshooting the beam extent by ~1 frame per
-  side. Those surplus frames are dark on every strip, so they are labeled
-  `-dark` and excluded from composites by default.
-* `fixed`: always raster the full X × Z grid.
 
-Ring-beam safeguards (all on by default):
+YThe raster stops when all four edges are dark, or at the specified `--x/--z` ranges (by default the entire range is explored). 
+
+  **A beam that fits inside one camera frame takes exactly one frame** (all four border strips of the seed frame are dark). 
+  
+The dark frames are labeled with `-dark` in the filename and excluded from composites by default.
+
+* `fixed`: always raster the specified XZ grid.
 
 * **Find-beam sweep** (`--find-beam/--no-find-beam`): when no
   `--calibration-x/-z` is given (or a slice reports `BeamFound: false`),
   the camera sweeps a column of frames along Z at the calibration X —
-  starting from the FAR extremum (away from the Z home switch, where the
-  beam sits on this rig) — looking for CONTRAST (frame max − median ≥ 30
-  counts). Contrast is the discriminator brightness can't be: exposure
-  calibration on a dark spot will happily "converge" by amplifying flat
-  ambient light, but ambient has no contrast at any exposure. A flat
-  sweep escalates exposure ×8 and retries twice before warning and
-  giving up.
+  starting from the FAR extrema (away from the Z home switch) looking for CONTRAST (frame max − median >= 30
+  counts).
 
 * **Blind probe**: if the seed frame is dark (seed landed in the ring's
   hollow interior), the raster grows up to `BlindProbePasses` (2) rings
   outward anyway hunting for the beam, then either resumes normal growth
   or stops with `BeamFound: false` in the metadata and a loud warning.
+  
 * **Follow-beam** (`--follow-beam/--no-follow-beam`): after each slice,
   the calibration point and raster seed move to that slice's brightest
   measured cell, so a ring whose radius changes along Y can't drift the
