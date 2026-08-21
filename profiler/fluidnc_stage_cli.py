@@ -194,7 +194,7 @@ def home(host: str, port: int, axes: str) -> None:
     help="Skip the software machine-limit check (soft limits still apply).",
 )
 def move(host: str, port: int, x_mm, y_mm, z_mm, feed: float, unsafe: bool) -> None:
-    """Absolute machine-coordinate move (G53 G1), waiting for completion."""
+    """Move to an absolute machine-coordinate position (G53 G1), then wait for motion to finish."""
 
     from fluidnc_stage import DEFAULT_MACHINE_LIMITS
 

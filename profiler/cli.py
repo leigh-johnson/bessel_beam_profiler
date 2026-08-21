@@ -12,7 +12,10 @@ from log_utils import configure_cli_logging
 from preflight_cli import preflight
 from scan_preview_cli import watch_command
 
-@click.group()
+# Pass max_content_width to click.group to avoid wrapping help text at 80 characters, which is the default.
+CONTEXT_SETTINGS = dict(max_content_width=256)
+
+@click.group(context_settings=CONTEXT_SETTINGS  )
 @click.option(
     "--log-level",
     default="INFO",
