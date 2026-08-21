@@ -22,7 +22,7 @@ optic, so the default is `-y` — stepping +Y along the stack means beam
 distance *decreases* from the measured start value. Re-verify (preflight
 `--motion`) if the gantry is ever re-oriented on the table (for example, if the beam path is reflected at the END of the optics table).
 
-## How G-code gets to FluidNC
+## How G-code is sent to FluidNC
 
 FluidNC (web ui: http://fluidnc-sr2.local) sends GRBL protocol over a raw TCP socket on port
 23 (the Telnet server on `fluidnc-sr2.local` / 10.43.19.86 same host as the web ui). `profiler/fluidnc_stage.py` wraps this:
@@ -85,7 +85,7 @@ Workflow per placement (repeats for as many placements as needed):
   strips, referenced to this slice's own off-axis background
   (p99 + `--signal-margin` counts, at least `--min-signal-pixels` pixels).
 
-YThe raster stops when all four edges are dark, or at the specified `--x/--z` ranges (by default the entire range is explored). 
+The raster stops when all four edges are dark, or at the specified `--x/--z` ranges (by default the entire range is explored). 
 
   **A beam that fits inside one camera frame takes exactly one frame** (all four border strips of the seed frame are dark). 
   
@@ -98,19 +98,12 @@ The dark frames are labeled with `-dark` in the filename and excluded from compo
   the camera sweeps a column of frames along Z at the calibration X —
   starting from the FAR extrema (away from the Z home switch) looking for CONTRAST (frame max − median >= 30
   counts).
-
-* **Blind probe**: if the seed frame is dark (seed landed in the ring's
-  hollow interior), the raster grows up to `BlindProbePasses` (2) rings
-  outward anyway hunting for the beam, then either resumes normal growth
-  or stops with `BeamFound: false` in the metadata and a loud warning.
   
 * **Follow-beam** (`--follow-beam/--no-follow-beam`): after each slice,
   the calibration point and raster seed move to that slice's brightest
-  measured cell, so a ring whose radius changes along Y can't drift the
-  fixed point into darkness. The point used is recorded per slice in
-  `calibration_result.json` (`CalibrationX_mm`/`CalibrationZ_mm`).
+  measured cell.
 
-Every slice folder gets a `raster_metadata.json` in either mode: the grid,
+Every slice folder gets a `raster_metadata.json` containing the grid,
 final rectangle, cells captured vs. the full-grid count, per-cell border
 signal flags and file paths, growth history per pass, why each edge
 stopped (`dark`/`cap`), the signal threshold and where it came from, and
@@ -122,22 +115,15 @@ stopped (`dark`/`cap`), the signal threshold and where it came from, and
   drives to an X/Z position outside the beam (default: the machine-limit
   X/Z corner farthest from the raster; override with
   `--background-x/--background-z`) and captures `--background-shots`
-  frames at that slice's calibrated exposure. Exact exposure match per
-  slice, tracks drift over the run, no manual beam blocking — it corrects
-  for ambient light (plus whatever stray scatter reaches the off-axis
-  position). **Validate once**: at the highest-exposure (dimmest) slice,
-  compare a corner frame with the beam on vs. physically blocked; if they
-  match, the corner is beam-free.
-
-  Cadence: the corner round trip only happens when the calibrated
-  exposure has changed by at least `--background-exposure-change`
-  (default 10%) since the background was last *captured* — cumulative, so
-  slow drift still triggers a refresh; set 0 to capture at every slice.
-  Slices that reuse an earlier background say so in their
-  `background_reference.json` (which background frames apply, their
-  exposure, the change fraction) — analysis should always resolve the
-  background through that file rather than assuming one per folder.
-* `none` (or `--skip-background`): quick alignment runs.
+  frames at that slice's calibrated exposure.
+  
+  New background shots are taken only when exposure has changed by at least `--background-exposure-change`
+  (default 10%) since the background was last captured. 
+  set `--background-exposure-change=0` to capture at every slice.
+  Slices that reuse an earlier background indicate this in
+  `background_reference.json`
+  
+* `none` (or `--skip-background`): quick runs without background images
 
 ## Output layout
 
@@ -172,58 +158,35 @@ Every frame's manifest record carries `Exposure_us`, `MachineY_mm`,
 ## Logging
 
 The CLI configures Python logging at INFO by default (`--log-level` on the
-top-level `cli` group changes it). All scan progress — slice headers,
+top-level `cli` group changes it). All scan progress is logged (slice headers,
 calibration results, background capture/reuse decisions, adaptive-raster
-growth and truncation warnings — goes through `logging`. The dataset
-subcommands (`auto`, `static`, `manual`) mirror it into a timestamped
+growth and truncation warnings). The dataset
+subcommands (`auto`, `static`, `manual`) write to a timestamped
 `scan.log` in the run directory. For `dataset auto`, each placement's
-run directory gets its own scan.log (the handler swaps when a new
-placement starts). Interactive prompts and plan confirmations remain
-plain console output.
+run directory gets its own `scan.log`.
 
 ## WiFi drop-offs and auto-reconnect
 
 The ESP32 rides the moving gantry on WiFi, so link drop-offs are
-expected. The client auto-heals them: on a socket error or status
-timeout it reconnects (5 attempts, 2 s apart, configurable via
-`ReconnectAttempts`/`ReconnectDelay_s`) and retries the operation once.
-This is safe because status queries are read-only and all motion is
-absolute G53 — a re-sent move is idempotent. A mere WiFi blip is
-invisible to the scan (buffered motion keeps executing on the board;
-polling resumes after reconnect). A controller REBOOT (power blip, not
-just WiFi) is different: the board comes back in Alarm with position
-lost — the client detects this, logs it loudly, and lets the next
-motion command fail rather than moving blind; re-home and restart the
-placement. Protocol-level replies (`error:N`, `ALARM:n`) never trigger
-reconnects — those mean the link is fine.
+expected (FluidNC only accepts network requests while all motors are idle). The client automatically reconnects on a socket error or status
+timeout (5 attempts, 2 s apart, configurable via
+`ReconnectAttempts`/`ReconnectDelay_s`).
 
 ## Live preview (`--preview` / `dataset watch`)
 
 `dataset auto --preview` opens a live viewer showing each frame as it is
 saved (filename, peak counts, timestamp). It runs as a SEPARATE process
-that tails the run directory — file reads only, never the camera — so it
-cannot slow, block, or crash the capture loop; closing the window has no
-effect on the scan. Same viewer by hand, from a second terminal,
-during or after a scan:
+that tails the run directory.
 
 ```
 python cli.py dataset watch                    # newest run under data/
 python cli.py dataset watch <run_dir>          # a specific run
 ```
 
-Mid-write files are retried on the next tick, and dark-frame renames are
-picked up automatically. The viewer shows every .npy the scan writes,
-including background and '-dark' frames (the title tells you which).
-
 ## Defaults worth knowing
 
 * Feed 400 mm/min (machine max_rate is 500); 0.2 s settle after Idle.
 * X steps 5 mm and Z steps 4 mm ≈ 25–30 % overlap for the BFS-PGE-31S4M's
   7.1 × 5.3 mm sensor, for stitching.
-* Y stack 10 → 150 mm in 10 mm steps (15 slices; ~140 mm of beam per
-  placement). Z caps default −75…−45 (vertical window around mid-travel) —
-  set these around wherever the beam actually sits after you find it.
-* `--skip-background` for quick alignment runs; `--skip-homing` only if
-  already homed this power-cycle *and* the gantry hasn't been touched.
-* For measurement runs remember the config note: flip `idle_ms` to 255 so
-  holding current stays on between moves.
+* `--skip-background` for quick alignment runs
+* `--skip-homing` only if already homed this power-cycle *and* the gantry hasn't been touched.
